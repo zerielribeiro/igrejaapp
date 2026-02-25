@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Save } from 'lucide-react';
@@ -12,23 +12,56 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 
-export default function NovoMembroPage() {
+export default function EditarMembroPage() {
     const params = useParams();
     const slug = params.slug as string;
+    const memberId = params.id as string;
     const router = useRouter();
-    const { rooms, addMember } = useAuth();
+    const { rooms, members, updateMember } = useAuth();
+
+    const member = members.find(m => m.id === memberId);
 
     // Form states
-    const [name, setName] = useState('');
-    const [cpf, setCpf] = useState('');
-    const [birth, setBirth] = useState('');
-    const [phone, setPhone] = useState('');
-    const [email, setEmail] = useState('');
-    const [address, setAddress] = useState('');
-    const [baptism, setBaptism] = useState('');
-    const [join, setJoin] = useState(new Date().toISOString().split('T')[0]);
-    const [roomId, setRoomId] = useState('unassigned');
-    const [status, setStatus] = useState<'ativo' | 'inativo' | 'visitante' | 'transferido'>('ativo');
+    const [name, setName] = useState(member?.full_name || '');
+    const [cpf, setCpf] = useState(member?.cpf || '');
+    const [birth, setBirth] = useState(member?.birth_date || '');
+    const [phone, setPhone] = useState(member?.phone || '');
+    const [email, setEmail] = useState(member?.email || '');
+    const [address, setAddress] = useState(member?.address || '');
+    const [baptism, setBaptism] = useState(member?.baptism_date || '');
+    const [join, setJoin] = useState(member?.join_date || '');
+    const [roomId, setRoomId] = useState(member?.room_id || 'unassigned');
+    const [status, setStatus] = useState<'ativo' | 'inativo' | 'visitante' | 'transferido'>(
+        (member?.status as any) || 'ativo'
+    );
+
+
+    // Populate form when member data is available
+    useEffect(() => {
+        if (member) {
+            setName(member.full_name || '');
+            setCpf(member.cpf || '');
+            setBirth(member.birth_date || '');
+            setPhone(member.phone || '');
+            setEmail(member.email || '');
+            setAddress(member.address || '');
+            setBaptism(member.baptism_date || '');
+            setJoin(member.join_date || '');
+            setRoomId(member.room_id || 'unassigned');
+            setStatus(member.status || 'ativo');
+        }
+    }, [member]);
+
+    if (!member) {
+        return (
+            <div className="text-center py-20">
+                <p className="text-muted-foreground">Membro não encontrado.</p>
+                <Link href={`/${slug}/membros`}>
+                    <Button variant="outline" className="mt-4">Voltar</Button>
+                </Link>
+            </div>
+        );
+    }
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -37,7 +70,7 @@ export default function NovoMembroPage() {
             return;
         }
 
-        addMember({
+        updateMember(memberId, {
             full_name: name,
             cpf,
             birth_date: birth,
@@ -48,25 +81,25 @@ export default function NovoMembroPage() {
             join_date: join,
             room_id: roomId,
             status,
-            age_group: 'Adulto', // Defaulting for simple form, could be calculated
         });
 
-        toast.success('Membro cadastrado com sucesso!');
-        router.push(`/${slug}/membros`);
+        toast.success('Membro atualizado com sucesso!');
+        router.push(`/${slug}/membros/${memberId}`);
     };
 
     return (
         <div className="space-y-6 max-w-3xl">
             <div className="flex items-center gap-3">
-                <Link href={`/${slug}/membros`}>
+                <Link href={`/${slug}/membros/${memberId}`}>
                     <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
                 </Link>
-                <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Novo Membro</h1>
+                <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Editar Membro</h1>
             </div>
 
             <Card className="animate-fade-in">
                 <CardContent className="p-6">
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    {/* Key property forces re-render if the member data loads after initial mount */}
+                    <form onSubmit={handleSubmit} className="space-y-6" key={member.id}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="sm:col-span-2 space-y-2">
                                 <Label htmlFor="name">Nome Completo *</Label>
@@ -126,11 +159,11 @@ export default function NovoMembroPage() {
                             </div>
                         </div>
                         <div className="flex justify-end gap-3">
-                            <Link href={`/${slug}/membros`}>
+                            <Link href={`/${slug}/membros/${memberId}`}>
                                 <Button type="button" variant="outline">Cancelar</Button>
                             </Link>
                             <Button type="submit" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
-                                <Save className="h-4 w-4 mr-1" /> Salvar Membro
+                                <Save className="h-4 w-4 mr-1" /> Salvar Alterações
                             </Button>
                         </div>
                     </form>

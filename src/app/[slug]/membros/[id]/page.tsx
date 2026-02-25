@@ -1,20 +1,24 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Phone, Mail, MapPin, Calendar, Edit } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ArrowLeft, Phone, Mail, MapPin, Calendar, Edit, Trash2 } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { mockMembers, mockRooms } from '@/lib/mock-data';
+import { useAuth } from '@/lib/auth-context';
+import { toast } from 'sonner';
 
 export default function MemberDetailPage() {
     const params = useParams();
+    const router = useRouter();
     const slug = params.slug as string;
     const memberId = params.id as string;
-    const member = mockMembers.find(m => m.id === memberId);
+    const { members, rooms, removeMember } = useAuth();
+
+    const member = members.find(m => m.id === memberId);
 
     if (!member) {
         return (
@@ -27,7 +31,7 @@ export default function MemberDetailPage() {
         );
     }
 
-    const room = mockRooms.find(r => r.id === member.room_id);
+    const room = rooms.find(r => r.id === member.room_id);
     const initials = member.full_name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
     const infoItems = [
@@ -39,13 +43,33 @@ export default function MemberDetailPage() {
         { icon: Calendar, label: 'Batismo', value: member.baptism_date ? new Date(member.baptism_date).toLocaleDateString('pt-BR') : 'Não informado' },
     ];
 
+    const handleDelete = () => {
+        if (confirm('Tem certeza que deseja excluir este membro?')) {
+            removeMember(member.id);
+            toast.success('Membro excluído com sucesso');
+            router.push(`/${slug}/membros`);
+        }
+    };
+
     return (
         <div className="space-y-6 max-w-3xl">
-            <div className="flex items-center gap-3">
-                <Link href={`/${slug}/membros`}>
-                    <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
-                </Link>
-                <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Detalhes do Membro</h1>
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                    <Link href={`/${slug}/membros`}>
+                        <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
+                    </Link>
+                    <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Detalhes do Membro</h1>
+                </div>
+                <div className="flex gap-2">
+                    <Button variant="destructive" size="sm" onClick={handleDelete}>
+                        <Trash2 className="h-4 w-4 mr-1" /> Excluir
+                    </Button>
+                    <Link href={`/${slug}/membros/${member.id}/editar`}>
+                        <Button size="sm" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
+                            <Edit className="h-4 w-4 mr-1" /> Editar
+                        </Button>
+                    </Link>
+                </div>
             </div>
 
             <Card className="animate-fade-in">

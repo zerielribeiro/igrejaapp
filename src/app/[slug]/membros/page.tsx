@@ -12,7 +12,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/lib/auth-context';
-import { mockRooms } from '@/lib/mock-data';
 import { toast } from 'sonner';
 
 const PAGE_SIZE = 10;
@@ -27,7 +26,7 @@ const statusColors: Record<string, string> = {
 export default function MembrosPage() {
     const params = useParams();
     const slug = params.slug as string;
-    const { members } = useAuth();
+    const { members, rooms } = useAuth();
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [ageFilter, setAgeFilter] = useState('all');
@@ -118,7 +117,7 @@ export default function MembrosPage() {
                             </TableHeader>
                             <TableBody>
                                 {paginated.map((member) => {
-                                    const room = mockRooms.find(r => r.id === member.room_id);
+                                    const room = rooms.find(r => r.id === member.room_id);
                                     return (
                                         <TableRow key={member.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
                                             <TableCell>
