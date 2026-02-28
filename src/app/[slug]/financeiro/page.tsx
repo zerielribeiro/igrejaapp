@@ -82,6 +82,12 @@ export default function FinanceiroPage() {
             return;
         }
 
+        const parsedAmount = parseFloat(amount);
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            toast.error('O valor deve ser maior que zero.');
+            return;
+        }
+
         // Find the category name from id if it was selected from list
         // Actually, our category state holds the name currently in UI but we should use IDs or names.
         // Looking at database schema, category is a text field. So we use names.
@@ -136,12 +142,25 @@ export default function FinanceiroPage() {
         }
     };
 
-    const monthlyData = [
-        { month: 'Fev', income: totalIncome, expense: totalExpense },
-        // Mocking historical data for the chart for now to keep it looking good
-        { month: 'Jan', income: 7500, expense: 7200 },
-        { month: 'Dez', income: 12500, expense: 9500 },
-    ];
+    // Build real monthly data from transactions
+    const monthlyData = useMemo(() => {
+        const months: Record<string, { income: number; expense: number }> = {};
+        transactions.forEach(t => {
+            const d = new Date(t.transaction_date);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            if (!months[key]) months[key] = { income: 0, expense: 0 };
+            if (t.type === 'entrada') months[key].income += t.amount;
+            else months[key].expense += t.amount;
+        });
+        return Object.entries(months)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .slice(-6)
+            .map(([key, val]) => {
+                const [y, m] = key.split('-');
+                const label = new Date(parseInt(y), parseInt(m) - 1).toLocaleDateString('pt-BR', { month: 'short' });
+                return { month: label, ...val };
+            });
+    }, [transactions]);
 
     return (
         <div className="space-y-6">
@@ -276,7 +295,7 @@ export default function FinanceiroPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Valor (R$)</Label>
-                                    <Input type="number" placeholder="0,00" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
+                                    <Input type="number" placeholder="0,00" step="0.01" min="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Data</Label>

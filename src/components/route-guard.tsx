@@ -5,9 +5,20 @@ import { useRouter, useParams, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AlertCircle, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+
+// Map URL segments to module permission keys
+const moduleFromPath: Record<string, string> = {
+    dashboard: 'dashboard',
+    membros: 'membros',
+    chamada: 'chamada',
+    relatorios: 'relatorios',
+    financeiro: 'financeiro',
+    configuracoes: 'configuracoes',
+};
 
 export function RouteGuard({ children }: { children: React.ReactNode }) {
-    const { session, isLoading, logout } = useAuth();
+    const { session, isLoading, logout, rolePermissions } = useAuth();
     const router = useRouter();
     const params = useParams();
     const pathname = usePathname();
@@ -33,8 +44,6 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
         }
 
         // 2. Check if the logged-in user belongs to this church slug
-        // Special case: superadmin might bypass or have different logic, 
-        // but here we enforce that the session church slug matches the URL slug.
         if (session.user.role !== 'super_admin' && session.church.slug !== slug) {
             console.warn(`RouteGuard: Institution mismatch. User(${session.church.slug}) tried to access (${slug}). Redirecting.`);
             setAuthorized(false);
@@ -42,8 +51,28 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
             return;
         }
 
+        // 3. SECURITY FIX: Check module-level permissions based on role
+        if (session.user.role !== 'super_admin') {
+            const segments = pathname.split('/');
+            const moduleSegment = segments[2]; // /[slug]/[module]/...
+            const moduleKey = moduleSegment ? moduleFromPath[moduleSegment] : null;
+
+            if (moduleKey) {
+                const userRolePermission = rolePermissions.find(rp => rp.role === session.user.role);
+                const hasModuleAccess = userRolePermission?.modules?.[moduleKey] ?? false;
+
+                if (!hasModuleAccess) {
+                    console.warn(`RouteGuard: Role "${session.user.role}" denied access to module "${moduleKey}".`);
+                    setAuthorized(false);
+                    toast.error(`Você não tem permissão para acessar o módulo "${moduleKey}".`);
+                    router.push(`/${slug}/dashboard`);
+                    return;
+                }
+            }
+        }
+
         setAuthorized(true);
-    }, [session, isLoading, slug, router]);
+    }, [session, isLoading, slug, router, pathname, rolePermissions]);
 
     // Show nothing (or a loading spinner) while checking/redirecting
     if (isLoading || !authorized) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Save } from 'lucide-react';
@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { formatCPF, isValidCPF, formatPhone, calculateAgeGroup, isReasonableDate } from '@/lib/validators';
 
 export default function NovoMembroPage() {
     const params = useParams();
@@ -32,27 +33,63 @@ export default function NovoMembroPage() {
 
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Auto-calculate age group from birth date
+    const ageGroup = useMemo(() => {
+        if (!birth) return 'Adulto';
+        return calculateAgeGroup(birth);
+    }, [birth]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name || !birth || !join) {
+        if (!name.trim() || !birth || !join) {
             toast.error('Preencha todos os campos obrigatórios.');
+            return;
+        }
+
+        // Validate CPF if provided
+        if (cpf && !isValidCPF(cpf)) {
+            toast.error('CPF inválido. Verifique os dígitos.');
+            return;
+        }
+
+        // Validate birth date is reasonable
+        if (!isReasonableDate(birth)) {
+            toast.error('Data de nascimento inválida. Deve ser entre 1900 e hoje.');
+            return;
+        }
+
+        // Validate baptism date
+        if (baptism) {
+            if (!isReasonableDate(baptism)) {
+                toast.error('Data de batismo inválida.');
+                return;
+            }
+            if (new Date(baptism) < new Date(birth)) {
+                toast.error('Data de batismo não pode ser anterior à data de nascimento.');
+                return;
+            }
+        }
+
+        // Validate join date
+        if (new Date(join) < new Date(birth)) {
+            toast.error('Data de ingresso não pode ser anterior à data de nascimento.');
             return;
         }
 
         setIsSubmitting(true);
 
         const payload = {
-            full_name: name,
-            cpf,
+            full_name: name.trim(),
+            cpf: cpf ? cpf.replace(/\D/g, '') : '',
             birth_date: birth,
-            phone,
-            email,
-            address,
+            phone: phone.replace(/\D/g, ''),
+            email: email.trim(),
+            address: address.trim(),
             baptism_date: baptism || undefined,
             join_date: join,
             room_id: roomId === 'unassigned' ? null : roomId,
             status,
-            age_group: 'Adulto', // Defaulting for simple form, could be calculated
+            age_group: ageGroup,
         };
 
         const { success, error } = await addMember(payload as any);
@@ -86,15 +123,15 @@ export default function NovoMembroPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="cpf">CPF</Label>
-                                <Input id="cpf" placeholder="000.000.000-00" value={cpf} onChange={e => setCpf(e.target.value)} />
+                                <Input id="cpf" placeholder="000.000.000-00" value={cpf} onChange={e => setCpf(formatCPF(e.target.value))} maxLength={14} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="birth">Data de Nascimento *</Label>
-                                <Input id="birth" type="date" required value={birth} onChange={e => setBirth(e.target.value)} />
+                                <Input id="birth" type="date" required value={birth} onChange={e => setBirth(e.target.value)} max={new Date().toISOString().split('T')[0]} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="phone">Telefone</Label>
-                                <Input id="phone" placeholder="(00) 00000-0000" value={phone} onChange={e => setPhone(e.target.value)} />
+                                <Input id="phone" placeholder="(00) 00000-0000" value={phone} onChange={e => setPhone(formatPhone(e.target.value))} maxLength={15} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="email">E-mail</Label>
@@ -106,11 +143,15 @@ export default function NovoMembroPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="baptism">Data de Batismo</Label>
-                                <Input id="baptism" type="date" value={baptism} onChange={e => setBaptism(e.target.value)} />
+                                <Input id="baptism" type="date" value={baptism} onChange={e => setBaptism(e.target.value)} max={new Date().toISOString().split('T')[0]} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="join">Data de Ingresso *</Label>
                                 <Input id="join" type="date" required value={join} onChange={e => setJoin(e.target.value)} />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Faixa Etária</Label>
+                                <Input value={ageGroup} disabled className="bg-muted" />
                             </div>
                             <div className="space-y-2">
                                 <Label>Sala *</Label>
@@ -141,8 +182,8 @@ export default function NovoMembroPage() {
                             <Link href={`/${slug}/membros`}>
                                 <Button type="button" variant="outline">Cancelar</Button>
                             </Link>
-                            <Button type="submit" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
-                                <Save className="h-4 w-4 mr-1" /> Salvar Membro
+                            <Button type="submit" className="bg-secondary text-secondary-foreground hover:bg-secondary/90" disabled={isSubmitting}>
+                                <Save className="h-4 w-4 mr-1" /> {isSubmitting ? 'Salvando...' : 'Salvar Membro'}
                             </Button>
                         </div>
                     </form>

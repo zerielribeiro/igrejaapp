@@ -206,7 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 .single();
 
             if (profileError || !profile) {
-                console.error('Profile fetch error:', profileError);
+                console.error('loadUserSession: Profile fetch error:', profileError);
                 if (profileError?.message?.includes('Failed to fetch') || profileError?.message?.includes('timeout')) {
                     toast.error('Erro de conexão com o servidor. Verifique sua internet.');
                 } else if (profileError) {
@@ -214,6 +214,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 return false;
             }
+
+            console.log('loadUserSession: Profile loaded successfully:', profile.email, 'Role:', profile.role);
 
             const user = mapProfile(profile);
             // console.log('Profile loaded:', user.name);
@@ -353,11 +355,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 .single();
 
             if (!profile) {
+                console.error('login: Profile not found for user ID:', data.user.id);
                 toast.error('Perfil não encontrado no sistema.');
                 await supabase.auth.signOut();
                 setIsLoading(false);
                 return false;
             }
+
+            console.log('login: User authenticated, profile role:', profile.role);
 
             // Check if user belongs to the correct church (by slug)
             if (slug && slug !== 'superadmin' && profile.role !== 'super_admin') {
@@ -409,13 +414,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const changePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<boolean> => {
         try {
+            // SECURITY FIX: Verify current password before changing
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user?.email) return false;
+
+            const { error: verifyError } = await supabase.auth.signInWithPassword({
+                email: user.email,
+                password: currentPassword,
+            });
+            if (verifyError) {
+                toast.error('Senha atual incorreta.');
+                return false;
+            }
+
+            if (newPassword.length < 6) {
+                toast.error('A nova senha deve ter pelo menos 6 caracteres.');
+                return false;
+            }
+
             const { error } = await supabase.auth.updateUser({ password: newPassword });
             if (error) {
                 console.error('Password change error:', error);
+                toast.error('Erro ao alterar senha: ' + error.message);
                 return false;
             }
+            toast.success('Senha alterada com sucesso!');
             return true;
         } catch {
+            toast.error('Erro inesperado ao alterar senha.');
             return false;
         }
     }, [supabase]);
@@ -450,28 +476,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return false;
             }
 
-            // Auto sign-in in background to avoid blocking/crashing the main flow
-            setTimeout(async () => {
-                try {
-                    console.log('Attempting background auto sign-in for:', data.email);
-                    if (!supabase?.auth) return;
+            // FIX: Auto sign-in using proper async flow (no more setTimeout race condition)
+            try {
+                console.log('Attempting auto sign-in for:', data.email);
+                const signInResult = await supabase.auth.signInWithPassword({
+                    email: data.email,
+                    password: data.password,
+                });
 
-                    const signInResult = await supabase.auth.signInWithPassword({
-                        email: data.email,
-                        password: data.password,
-                    });
-
-                    if (!signInResult.error) {
-                        const userResponse = await supabase.auth.getUser();
-                        if (userResponse?.data?.user) {
-                            await loadUserSession(userResponse.data.user.id);
-                            toast.success('Bem-vindo ao sistema!');
-                        }
-                    }
-                } catch (e) {
-                    console.error('Background auto-login failed safely:', e);
+                if (!signInResult.error && signInResult.data?.user) {
+                    await loadUserSession(signInResult.data.user.id);
+                    toast.success('Bem-vindo ao sistema!');
                 }
-            }, 1000);
+            } catch (e) {
+                console.error('Auto-login failed:', e);
+                // Non-blocking: registration succeeded, user can login manually
+            }
 
             return true;
         } catch (err: any) {
@@ -495,19 +515,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const updateChurchData = useCallback(async (id: string, data: Partial<Church>): Promise<{ success: boolean; error?: string }> => {
         try {
+            // SECURITY FIX: Whitelist allowed fields to prevent slug/plan/is_active injection
+            const allowedFields = ['name', 'cnpj', 'pastor', 'address', 'phone', 'email', 'website', 'description', 'logo_url'];
+            const sanitizedData: Record<string, unknown> = {};
+            for (const key of allowedFields) {
+                if (key in data) {
+                    sanitizedData[key] = (data as Record<string, unknown>)[key];
+                }
+            }
+
+            if (Object.keys(sanitizedData).length === 0) {
+                return { success: false, error: 'Nenhum campo válido para atualizar.' };
+            }
+
             const { error } = await supabase
                 .from('churches')
-                .update(data)
+                .update(sanitizedData)
                 .eq('id', id);
 
             if (error) throw error;
 
-            setAllChurches(prev => prev.map(c => c.id === id ? { ...c, ...data } : c));
+            setAllChurches(prev => prev.map(c => c.id === id ? { ...c, ...sanitizedData } : c));
 
             // Also update the current session if it's the active church
             setSession(prev => {
                 if (prev && prev.church.id === id) {
-                    return { ...prev, church: { ...prev.church, ...data } };
+                    return { ...prev, church: { ...prev.church, ...sanitizedData } };
                 }
                 return prev;
             });
@@ -628,11 +661,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [session, supabase]);
 
     const updateRoom = useCallback(async (id: string, data: Partial<Room>): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
         try {
             const { error } = await supabase
                 .from('rooms')
                 .update(data)
-                .eq('id', id);
+                .eq('id', id)
+                .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
 
             if (error) throw error;
             setAllRooms(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
@@ -641,14 +676,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error('[updateRoom] Error:', err);
             return { success: false, error: err.message || 'Erro ao atualizar sala' };
         }
-    }, [supabase]);
+    }, [session, supabase]);
 
     const deleteRoom = useCallback(async (id: string): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
+
+        // Check if room has active members
+        const membersInRoom = allMembers.filter(m => m.room_id === id && m.status === 'ativo');
+        if (membersInRoom.length > 0) {
+            return { success: false, error: `Esta sala possui ${membersInRoom.length} membro(s) ativo(s). Remova ou transfira os membros antes de excluir.` };
+        }
+
         try {
             const { error } = await supabase
                 .from('rooms')
                 .delete()
-                .eq('id', id);
+                .eq('id', id)
+                .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
 
             if (error) throw error;
             setAllRooms(prev => prev.filter(r => r.id !== id));
@@ -657,7 +701,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error('[deleteRoom] Error:', err);
             return { success: false, error: err.message || 'Erro ao excluir sala' };
         }
-    }, [supabase]);
+    }, [session, supabase, allMembers]);
 
     // ─── Members CRUD ─────────────────────────────────────────────
     const addMember = useCallback(async (data: Omit<Member, 'id' | 'church_id' | 'created_at'>): Promise<{ success: boolean, error?: string }> => {
@@ -685,31 +729,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [session, supabase]);
 
-    const updateMember = useCallback(async (id: string, data: Partial<Member>) => {
-        const { error } = await supabase
-            .from('members')
-            .update(data)
-            .eq('id', id);
+    const updateMember = useCallback(async (id: string, data: Partial<Member>): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
+        try {
+            const { error } = await supabase
+                .from('members')
+                .update(data)
+                .eq('id', id)
+                .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
 
-        if (!error) {
+            if (error) throw error;
             setAllMembers(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
+            return { success: true };
+        } catch (err: any) {
+            console.error('[updateMember] Error:', err);
+            toast.error('Erro ao atualizar membro: ' + (err.message || 'Erro desconhecido'));
+            return { success: false, error: err.message || 'Erro ao atualizar membro' };
         }
-    }, [supabase]);
+    }, [session, supabase]);
 
-    const removeMember = useCallback(async (id: string) => {
-        const { error } = await supabase
-            .from('members')
-            .delete()
-            .eq('id', id);
+    const removeMember = useCallback(async (id: string): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
+        try {
+            const { error } = await supabase
+                .from('members')
+                .delete()
+                .eq('id', id)
+                .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
 
-        if (!error) {
+            if (error) throw error;
             setAllMembers(prev => prev.filter(m => m.id !== id));
+            toast.success('Membro removido com sucesso.');
+            return { success: true };
+        } catch (err: any) {
+            console.error('[removeMember] Error:', err);
+            toast.error('Erro ao remover membro: ' + (err.message || 'Erro desconhecido'));
+            return { success: false, error: err.message || 'Erro ao remover membro' };
         }
-    }, [supabase]);
+    }, [session, supabase]);
 
     // ─── Financials CRUD ──────────────────────────────────────────
     const addTransaction = useCallback(async (data: Omit<FinancialTransaction, 'id' | 'church_id' | 'created_at'>) => {
         if (!session) return;
+
+        // Validation: amount must be positive
+        if (!data.amount || data.amount <= 0) {
+            toast.error('O valor da transação deve ser maior que zero.');
+            return;
+        }
+
         const { data: newTx, error } = await supabase
             .from('financial_transactions')
             .insert({
@@ -722,6 +790,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!error && newTx) {
             setAllTransactions(prev => [...prev, newTx as FinancialTransaction]);
             toast.success('Transação registrada com sucesso!');
+        } else if (error) {
+            console.error('[addTransaction] Error:', error);
+            toast.error('Erro ao registrar transação: ' + (error.message || 'Erro desconhecido'));
         }
     }, [session, supabase]);
 
@@ -746,10 +817,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [session, supabase]);
 
     const updateCategory = useCallback(async (id: string, name: string) => {
+        if (!session) return;
         const { error } = await supabase
             .from('financial_categories')
             .update({ name })
-            .eq('id', id);
+            .eq('id', id)
+            .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
 
         if (!error) {
             setAllCategories(prev => prev.map(c => c.id === id ? { ...c, name } : c));
@@ -758,23 +831,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error('Error updating category:', error);
             toast.error('Erro ao atualizar categoria: ' + error.message);
         }
-    }, [supabase]);
+    }, [session, supabase]);
 
     const deleteCategory = useCallback(async (id: string) => {
+        if (!session) return;
         const { error } = await supabase
             .from('financial_categories')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
 
         if (!error) {
-            console.log('Category deleted successfully from DB:', id);
             setAllCategories(prev => prev.filter(c => c.id !== id));
             toast.success('Categoria excluída!');
         } else {
             console.error('Error deleting category:', error);
             toast.error('Erro ao excluir categoria: ' + error.message);
         }
-    }, [supabase]);
+    }, [session, supabase]);
 
     // ─── Attendance CRUD ──────────────────────────────────────────
     const saveAttendanceSession = useCallback(async (data: NewAttendanceSessionData): Promise<AttendanceSession | null> => {
@@ -820,6 +894,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ─── Visitors ─────────────────────────────────────────────────
     const addVisitor = useCallback(async (data: NewVisitorData) => {
         if (!session) return;
+
+        if (!data.name?.trim()) {
+            toast.error('O nome do visitante é obrigatório.');
+            return;
+        }
+
         const { data: newVisitor, error } = await supabase
             .from('visitors')
             .insert({
@@ -827,9 +907,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 room_id: data.room_id,
                 room_name: data.room_name,
                 session_date: data.session_date,
-                name: data.name,
-                address: data.address,
-                phone: data.phone,
+                name: data.name.trim(),
+                address: data.address?.trim() || null,
+                phone: data.phone?.trim() || null,
             })
             .select()
             .single();
@@ -837,6 +917,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!error && newVisitor) {
             setAllVisitors(prev => [...prev, newVisitor as Visitor]);
             toast.success('Visitante registrado com sucesso!');
+        } else if (error) {
+            console.error('[addVisitor] Error:', error);
+            toast.error('Erro ao registrar visitante: ' + (error.message || 'Erro desconhecido'));
         }
     }, [session, supabase]);
 

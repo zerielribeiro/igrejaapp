@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 
 export default function SuperAdminPage() {
-    const { session, churches, updateChurchStatus, logout, changePassword } = useAuth();
+    const { session, isLoading, churches, updateChurchStatus, logout, changePassword } = useAuth();
     const router = useRouter();
     const [search, setSearch] = useState('');
     const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
@@ -26,13 +26,26 @@ export default function SuperAdminPage() {
 
     // Security Guard: Only super_admin can see this page
     useEffect(() => {
-        if (!session || session.user.role !== 'super_admin') {
-            router.push('/superadmin/login');
+        if (!isLoading) {
+            if (!session) {
+                console.log('SuperAdminPage: No session, redirecting...');
+                router.push('/superadmin/login');
+            } else if (session.user.role !== 'super_admin') {
+                console.warn('SuperAdminPage: Not a super_admin:', session.user.role);
+                router.push('/');
+            }
         }
-    }, [session, router]);
+    }, [session, isLoading, router]);
 
-    if (!session || session.user.role !== 'super_admin') {
-        return null; // Prevents flash of content
+    if (isLoading || !session || session.user.role !== 'super_admin') {
+        return (
+            <div className="flex h-screen items-center justify-center">
+                <div className="flex flex-col items-center gap-2">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                    <p className="text-sm text-muted-foreground">Carregando painel...</p>
+                </div>
+            </div>
+        );
     }
 
     const filteredChurches = churches.filter(c =>

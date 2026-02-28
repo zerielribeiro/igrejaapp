@@ -5,18 +5,24 @@ import type { NextRequest } from 'next/server';
 export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    // 1. Skip static assets, root, and public routes
+    // 1. Skip static assets
+    if (
+        pathname.includes('.') ||
+        pathname.startsWith('/_next')
+    ) {
+        return updateSession(request);
+    }
+
+    // 2. Public routes that don't need auth
     if (
         pathname === '/' ||
-        pathname.includes('.') ||
-        pathname.startsWith('/_next') ||
         pathname === '/register' ||
         pathname.startsWith('/superadmin')
     ) {
         return updateSession(request);
     }
 
-    // 2. Extract slug from /[slug]/...
+    // 3. Extract slug from /[slug]/...
     const segments = pathname.split('/');
     const slug = segments[1];
 
@@ -24,13 +30,54 @@ export async function middleware(request: NextRequest) {
         return updateSession(request);
     }
 
-    // 3. Login pages don't need auth check
+    // 4. Login pages don't need auth check
     if (pathname.endsWith('/login')) {
         return updateSession(request);
     }
 
-    // 4. For all other routes, just refresh the session
-    return updateSession(request);
+    // 5. SECURITY FIX: Verify authentication for all protected routes
+    return verifyAuthAndUpdateSession(request, slug);
+}
+
+async function verifyAuthAndUpdateSession(request: NextRequest, slug: string) {
+    let supabaseResponse = NextResponse.next({
+        request,
+    });
+
+    const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+            cookies: {
+                getAll() {
+                    return request.cookies.getAll();
+                },
+                setAll(cookiesToSet) {
+                    cookiesToSet.forEach(({ name, value }) =>
+                        request.cookies.set(name, value)
+                    );
+                    supabaseResponse = NextResponse.next({
+                        request,
+                    });
+                    cookiesToSet.forEach(({ name, value, options }) =>
+                        supabaseResponse.cookies.set(name, value, options)
+                    );
+                },
+            },
+        }
+    );
+
+    // Verify user is authenticated
+    const { data: { user }, error } = await supabase.auth.getUser();
+
+    if (error || !user) {
+        // Not authenticated — redirect to login
+        const loginUrl = request.nextUrl.clone();
+        loginUrl.pathname = `/${slug}/login`;
+        return NextResponse.redirect(loginUrl);
+    }
+
+    return supabaseResponse;
 }
 
 async function updateSession(request: NextRequest) {
@@ -47,7 +94,7 @@ async function updateSession(request: NextRequest) {
                     return request.cookies.getAll();
                 },
                 setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value, options }) =>
+                    cookiesToSet.forEach(({ name, value }) =>
                         request.cookies.set(name, value)
                     );
                     supabaseResponse = NextResponse.next({
