@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Shield, Church, Users, Activity, ToggleLeft, ToggleRight, Search, BarChart3, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { Shield, Church, Users, Activity, Search, KeyRound, Eye, EyeOff, Trash2, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,17 +12,25 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import type { Church as ChurchType } from '@/lib/types';
 
 export default function SuperAdminPage() {
-    const { session, isLoading, churches, updateChurchStatus, logout, changePassword } = useAuth();
+    const { session, isLoading, churches, updateChurchStatus, logout, changePassword, deleteChurch } = useAuth();
     const router = useRouter();
     const [search, setSearch] = useState('');
+
+    // Password dialog state
     const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showCurrentPassword, setShowCurrentPassword] = useState(false);
     const [showNewPassword, setShowNewPassword] = useState(false);
+
+    // Delete dialog state
+    const [deleteTarget, setDeleteTarget] = useState<ChurchType | null>(null);
+    const [deleteConfirmName, setDeleteConfirmName] = useState('');
+    const [isDeleting, setIsDeleting] = useState(false);
 
     // Security Guard: Only super_admin can see this page
     useEffect(() => {
@@ -98,6 +106,39 @@ export default function SuperAdminPage() {
         }
     };
 
+    const openDeleteDialog = (church: ChurchType) => {
+        setDeleteTarget(church);
+        setDeleteConfirmName('');
+    };
+
+    const closeDeleteDialog = () => {
+        if (isDeleting) return;
+        setDeleteTarget(null);
+        setDeleteConfirmName('');
+    };
+
+    const handleDeleteChurch = async () => {
+        if (!deleteTarget) return;
+        if (deleteConfirmName !== deleteTarget.name) {
+            toast.error('O nome digitado não corresponde ao nome da igreja.');
+            return;
+        }
+
+        setIsDeleting(true);
+        try {
+            const result = await deleteChurch(deleteTarget.id);
+            if (result.success) {
+                toast.success(`Igreja "${deleteTarget.name}" excluída com sucesso.`);
+                setDeleteTarget(null);
+                setDeleteConfirmName('');
+            } else {
+                toast.error(result.error || 'Erro ao excluir a igreja.');
+            }
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     const planColors: Record<string, string> = {
         free: 'bg-gray-100 text-gray-700',
         basic: 'bg-blue-100 text-blue-700',
@@ -119,6 +160,7 @@ export default function SuperAdminPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        {/* Change Password Dialog */}
                         <Dialog open={passwordDialogOpen} onOpenChange={(open) => { setPasswordDialogOpen(open); if (!open) { setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); } }}>
                             <DialogTrigger asChild>
                                 <Button variant="outline" size="sm" className="gap-1.5">
@@ -261,14 +303,25 @@ export default function SuperAdminPage() {
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => handleToggleStatus(church.id, church.is_active, church.name)}
-                                                className="text-xs"
-                                            >
-                                                {church.is_active ? 'Desativar' : 'Ativar'}
-                                            </Button>
+                                            <div className="flex items-center justify-end gap-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleToggleStatus(church.id, church.is_active, church.name)}
+                                                    className="text-xs"
+                                                >
+                                                    {church.is_active ? 'Desativar' : 'Ativar'}
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => openDeleteDialog(church)}
+                                                    className="text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                    title="Excluir igreja e todos os dados"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -277,6 +330,81 @@ export default function SuperAdminPage() {
                     </CardContent>
                 </Card>
             </main>
+
+            {/* Delete Church Confirmation Dialog */}
+            <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-destructive">
+                            <AlertTriangle className="h-5 w-5" />
+                            Excluir Igreja Permanentemente
+                        </DialogTitle>
+                        <DialogDescription asChild>
+                            <div className="pt-2 space-y-2 text-sm text-muted-foreground">
+                                <span className="block">
+                                    Esta ação é <strong>irreversível</strong>. Serão excluídos permanentemente:
+                                </span>
+                                <ul className="list-disc list-inside space-y-0.5">
+                                    <li>Todos os perfis/usuários da igreja</li>
+                                    <li>Todos os membros e seus dados</li>
+                                    <li>Todas as transações financeiras</li>
+                                    <li>Todas as sessões de frequência</li>
+                                    <li>Salas, categorias, visitantes e notificações</li>
+                                </ul>
+                            </div>
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
+                            <p className="text-sm font-semibold text-destructive">
+                                Igreja a ser excluída:
+                            </p>
+                            <p className="text-base font-bold mt-1">{deleteTarget?.name}</p>
+                            <p className="text-xs text-muted-foreground">/{deleteTarget?.slug}</p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="delete-confirm">
+                                Para confirmar, digite exatamente o nome da igreja:
+                            </Label>
+                            <Input
+                                id="delete-confirm"
+                                placeholder={deleteTarget?.name}
+                                value={deleteConfirmName}
+                                onChange={e => setDeleteConfirmName(e.target.value)}
+                                disabled={isDeleting}
+                                autoComplete="off"
+                            />
+                            {deleteConfirmName && deleteConfirmName !== deleteTarget?.name && (
+                                <p className="text-xs text-destructive">O nome não corresponde.</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={closeDeleteDialog} disabled={isDeleting}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={handleDeleteChurch}
+                            disabled={deleteConfirmName !== deleteTarget?.name || isDeleting}
+                        >
+                            {isDeleting ? (
+                                <span className="flex items-center gap-2">
+                                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                    Excluindo...
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-2">
+                                    <Trash2 className="h-4 w-4" /> Excluir Permanentemente
+                                </span>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

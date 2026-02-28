@@ -56,6 +56,7 @@ interface AuthContextType {
     churches: Church[];
     updateChurchStatus: (id: string, isActive: boolean) => void;
     updateChurchData: (id: string, data: Partial<Church>) => Promise<{ success: boolean; error?: string }>;
+    deleteChurch: (id: string) => Promise<{ success: boolean; error?: string }>;
     // Users CRUD
     addUser: (data: NewUserData) => void;
     updateUser: (id: string, data: Partial<User>) => void;
@@ -552,6 +553,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [supabase]);
 
+    const deleteChurch = useCallback(async (id: string): Promise<{ success: boolean; error?: string }> => {
+        try {
+            const { data: result, error } = await supabase.rpc('delete_church_cascade', {
+                p_church_id: id,
+            });
+
+            if (error) {
+                console.error('deleteChurch RPC error:', error);
+                return { success: false, error: error.message };
+            }
+
+            if (!result?.success) {
+                const msg = result?.error || 'Erro ao excluir a igreja.';
+                console.error('deleteChurch failed:', msg);
+                return { success: false, error: msg };
+            }
+
+            // Remove church from local state
+            setAllChurches(prev => prev.filter(c => c.id !== id));
+            // Also remove related users/profiles from local state
+            setAllUsers(prev => prev.filter(u => u.church_id !== id));
+
+            return { success: true };
+        } catch (err: any) {
+            console.error('Exception in deleteChurch:', err);
+            return { success: false, error: err.message || 'Erro inesperado ao excluir a igreja.' };
+        }
+    }, [supabase]);
+
     // ─── Users CRUD ───────────────────────────────────────────────
     const addUser = useCallback(async (data: NewUserData) => {
         if (!session) return;
@@ -951,7 +981,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             session, users, rooms, rolePermissions, visitors,
             login, logout, registerChurch, isLoading, hasRole, changePassword,
             churches: allChurches, updateChurchStatus,
-            updateChurchData,
+            updateChurchData, deleteChurch,
             addUser, updateUser, deleteUser,
             addRoom, updateRoom, deleteRoom,
             updateRolePermission,
