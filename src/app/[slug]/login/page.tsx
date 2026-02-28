@@ -22,16 +22,22 @@ export default function LoginPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const success = await login(email, password, slug);
-        if (success) {
-            toast.success('Login realizado com sucesso!');
-            if (slug === 'superadmin') {
-                router.push('/superadmin');
-            } else {
-                router.push(`/${slug}/dashboard`);
+        try {
+            const success = await login(email, password, slug);
+            if (success) {
+                toast.success('Login realizado com sucesso!');
+                // Wait a micro-task to ensure state is flushed if needed
+                setTimeout(() => {
+                    if (slug === 'superadmin') {
+                        router.replace('/superadmin');
+                    } else {
+                        router.replace(`/${slug}/dashboard`);
+                    }
+                }, 100);
             }
-        } else {
-            toast.error('E-mail ou senha inválidos.');
+        } catch (err) {
+            console.error('Redirect error:', err);
+            toast.error('Erro ao redirecionar após o login.');
         }
     };
 

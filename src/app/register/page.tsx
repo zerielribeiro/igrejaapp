@@ -39,18 +39,25 @@ export default function RegisterPage() {
             return;
         }
         setIsLoading(true);
-        // Simulate async registration call
-        await new Promise(r => setTimeout(r, 800));
-        registerChurch({
-            churchName: formData.churchName,
-            slug: formData.slug,
-            pastor: formData.pastor,
-            email: formData.email,
-            password: formData.password,
-        });
-        toast.success('Igreja cadastrada com sucesso! Bem-vindo ao painel administrativo.');
-        router.push(`/${formData.slug}/configuracoes`);
+        try {
+            const success = await registerChurch({
+                churchName: formData.churchName,
+                slug: formData.slug,
+                pastor: formData.pastor,
+                email: formData.email,
+                password: formData.password,
+            });
+            if (success) {
+                toast.success('Igreja cadastrada com sucesso!');
+                router.push(`/${formData.slug}/login`);
+            }
+        } catch (error) {
+            console.error('Registration page error:', error);
+        } finally {
+            setIsLoading(false);
+        }
     };
+
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 p-4">

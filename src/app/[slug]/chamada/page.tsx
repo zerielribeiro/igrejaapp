@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Check, X, UserPlus, Clock, Users, Save, MapPin, Phone, User } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,6 @@ import {
     DialogFooter, DialogDescription
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/auth-context';
-import { mockAttendanceSessions } from '@/lib/mock-data';
 import { toast } from 'sonner';
 
 type AttendanceMap = Record<string, 'presente' | 'ausente' | null>;
@@ -25,12 +24,15 @@ interface VisitorFormData { name: string; address: string; phone: string; }
 const emptyVisitor: VisitorFormData = { name: '', address: '', phone: '' };
 
 export default function ChamadaPage() {
-    const { rooms, visitors, addVisitor, members, attendanceSessions, addAttendanceSession } = useAuth();
+    const { rooms, visitors, addVisitor, members, attendanceSessions, saveAttendanceSession } = useAuth();
     const activeRooms = rooms.filter(r => r.is_active);
 
     const [selectedRoom, setSelectedRoom] = useState(activeRooms[0]?.id ?? '');
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [attendance, setAttendance] = useState<AttendanceMap>({});
+    const [lastLoadedKey, setLastLoadedKey] = useState<string>('');
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
     // Visitor modal state
     const [visitorModalOpen, setVisitorModalOpen] = useState(false);
@@ -51,11 +53,47 @@ export default function ChamadaPage() {
         [visitors, selectedRoom, selectedDate]
     );
 
+    // Load existing session data when room or date changes
+    useEffect(() => {
+        // If we have unsaved changes, only reload if the user changed the room or date.
+        // This prevents the global attendanceSessions update from reverting the local state
+        // because of stale data during the save process.
+        const currentKey = `${selectedRoom}-${selectedDate}`;
+        const isNewSelection = lastLoadedKey !== currentKey;
+
+        if (!isNewSelection && hasUnsavedChanges) {
+            return;
+        }
+
+        const existingSession = attendanceSessions.find(s =>
+            s.room_id === selectedRoom &&
+            s.session_date.split('T')[0] === selectedDate
+        );
+
+        if (existingSession) {
+            const newAttendance: AttendanceMap = {};
+            existingSession.present_member_ids.forEach(id => { newAttendance[id] = 'presente'; });
+            existingSession.absent_member_ids.forEach(id => { newAttendance[id] = 'ausente'; });
+            setAttendance(newAttendance);
+            setCurrentSessionId(existingSession.id);
+        } else {
+            setAttendance({});
+            setCurrentSessionId(null);
+        }
+
+        setHasUnsavedChanges(false);
+        setLastLoadedKey(currentKey);
+    }, [selectedRoom, selectedDate, attendanceSessions]);
+
     const toggleAttendance = (memberId: string, status: 'presente' | 'ausente') => {
-        setAttendance(prev => ({
-            ...prev,
-            [memberId]: prev[memberId] === status ? null : status,
-        }));
+        // Only trigger changes if the status is actually different from the current one
+        if (attendance[memberId] !== status) {
+            setAttendance(prev => ({
+                ...prev,
+                [memberId]: status,
+            }));
+            setHasUnsavedChanges(true);
+        }
     };
 
     const markedCount = Object.values(attendance).filter(Boolean).length;
@@ -83,9 +121,10 @@ export default function ChamadaPage() {
         toast.success(`Visitante "${visitorForm.name}" cadastrado com sucesso!`);
         setSavingVisitor(false);
         setVisitorModalOpen(false);
+        setHasUnsavedChanges(true); // Visitor added is a change that needs finalizing
     };
 
-    const finalize = () => {
+    const finalize = async () => {
         const presentIds = Object.entries(attendance)
             .filter(([_, status]) => status === 'presente')
             .map(([id]) => id);
@@ -94,18 +133,28 @@ export default function ChamadaPage() {
             .filter(([_, status]) => status === 'ausente')
             .map(([id]) => id);
 
-        addAttendanceSession({
-            room_id: selectedRoom,
-            room_name: selectedRoomName,
-            session_date: selectedDate,
-            present_member_ids: presentIds,
-            absent_member_ids: absentIds,
-            total_present: presentCount,
-            total_absent: absentCount,
-            finalized: true,
-        });
-        toast.success(`Chamada finalizada! ${presentCount} presentes, ${absentCount} ausentes, ${sessionVisitors.length} visitante(s).`);
+        try {
+            const saved = await saveAttendanceSession({
+                room_id: selectedRoom,
+                room_name: selectedRoomName,
+                session_date: selectedDate,
+                present_member_ids: presentIds,
+                absent_member_ids: absentIds,
+                total_present: presentCount,
+                total_absent: absentCount,
+                finalized: true,
+            });
+            if (saved) {
+                setCurrentSessionId(saved.id);
+            }
+            setHasUnsavedChanges(false);
+            toast.success(`Chamada finalizada! ${presentCount} presentes, ${absentCount} ausentes, ${sessionVisitors.length} visitante(s).`);
+        } catch (error: any) {
+            console.error('Erro ao finalizar chamada:', error);
+            toast.error('Erro ao salvar a chamada: ' + (error?.message || 'Tente novamente.'));
+        }
     };
+
 
     const getInitials = (name: string) => name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
@@ -195,6 +244,7 @@ export default function ChamadaPage() {
                                                     variant={attendance[member.id] === 'presente' ? 'default' : 'outline'}
                                                     className={`h-10 w-10 p-0 ${attendance[member.id] === 'presente' ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600' : ''}`}
                                                     onClick={() => toggleAttendance(member.id, 'presente')}
+                                                    disabled={attendance[member.id] === 'presente'}
                                                 >
                                                     <Check className="h-5 w-5" />
                                                 </Button>
@@ -203,6 +253,7 @@ export default function ChamadaPage() {
                                                     variant={attendance[member.id] === 'ausente' ? 'default' : 'outline'}
                                                     className={`h-10 w-10 p-0 ${attendance[member.id] === 'ausente' ? 'bg-red-600 hover:bg-red-700 text-white border-red-600' : ''}`}
                                                     onClick={() => toggleAttendance(member.id, 'ausente')}
+                                                    disabled={attendance[member.id] === 'ausente'}
                                                 >
                                                     <X className="h-5 w-5" />
                                                 </Button>
@@ -275,10 +326,10 @@ export default function ChamadaPage() {
                     <Button
                         onClick={finalize}
                         className="w-full bg-secondary text-secondary-foreground hover:bg-secondary/90 h-12 text-base"
-                        disabled={markedCount === 0}
+                        disabled={!hasUnsavedChanges || markedCount === 0}
                     >
                         <Save className="h-5 w-5 mr-2" />
-                        Finalizar Chamada
+                        {hasUnsavedChanges ? 'Finalizar Chamada' : 'Chamada Salva / Finalizada'}
                     </Button>
                 </TabsContent>
 

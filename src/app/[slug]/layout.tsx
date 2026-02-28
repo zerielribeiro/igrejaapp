@@ -6,14 +6,42 @@ import { Separator } from '@/components/ui/separator';
 import { Bell } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth-context';
-import { useParams, usePathname } from 'next/navigation';
+import { useParams, usePathname, useRouter } from 'next/navigation';
 import { RouteGuard } from '@/components/route-guard';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { User, KeyRound, LogOut, ChevronDown } from 'lucide-react';
+import { ChangePasswordDialog } from '@/components/change-password-dialog';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
 export default function TenantLayout({ children }: { children: React.ReactNode }) {
     const params = useParams();
     const pathname = usePathname();
+    const router = useRouter();
     const slug = params.slug as string;
-    const { session } = useAuth();
+    const { session, logout } = useAuth();
+    const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+
+    const roleTranslations: Record<string, string> = {
+        'super_admin': 'Super Administrador',
+        'admin': 'Administrador',
+        'pastor': 'Pastor',
+        'treasurer': 'Tesoureiro',
+        'secretary': 'Secretária'
+    };
+
+    const handleLogout = () => {
+        logout();
+        router.push(`/${slug}/login`);
+        toast.success('Logout realizado');
+    };
 
     const isPublicPage = pathname.endsWith('/login') || pathname.endsWith('/register') || pathname === '/';
 
@@ -37,10 +65,41 @@ export default function TenantLayout({ children }: { children: React.ReactNode }
                                     2
                                 </Badge>
                             </button>
-                            <div className="hidden md:flex flex-col items-end">
-                                <span className="text-sm font-medium">{session?.user.name}</span>
-                                <span className="text-xs text-muted-foreground capitalize">{session?.user.role}</span>
-                            </div>
+
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <button className="flex items-center gap-3 p-1 rounded-lg hover:bg-muted transition-colors outline-none">
+                                        <div className="hidden md:flex flex-col items-end">
+                                            <span className="text-sm font-medium">{session?.user.name}</span>
+                                            <span className="text-xs text-muted-foreground capitalize">
+                                                {session?.user.role ? roleTranslations[session.user.role] || session.user.role : ''}
+                                            </span>
+                                        </div>
+                                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                                            <User className="h-5 w-5" />
+                                        </div>
+                                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56">
+                                    <DropdownMenuLabel>Minha Conta</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => setPasswordDialogOpen(true)} className="cursor-pointer">
+                                        <KeyRound className="mr-2 h-4 w-4" />
+                                        Trocar Senha
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
+                                        <LogOut className="mr-2 h-4 w-4" />
+                                        Sair
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+
+                            <ChangePasswordDialog
+                                open={passwordDialogOpen}
+                                onOpenChange={setPasswordDialogOpen}
+                            />
                         </div>
                     </header>
                     <main className="flex-1 p-4 md:p-6 lg:p-8">

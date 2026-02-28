@@ -30,14 +30,18 @@ export default function NovoMembroPage() {
     const [roomId, setRoomId] = useState('unassigned');
     const [status, setStatus] = useState<'ativo' | 'inativo' | 'visitante' | 'transferido'>('ativo');
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name || !birth || !join || !roomId) {
+        if (!name || !birth || !join) {
             toast.error('Preencha todos os campos obrigatórios.');
             return;
         }
 
-        addMember({
+        setIsSubmitting(true);
+
+        const payload = {
             full_name: name,
             cpf,
             birth_date: birth,
@@ -46,13 +50,21 @@ export default function NovoMembroPage() {
             address,
             baptism_date: baptism || undefined,
             join_date: join,
-            room_id: roomId,
+            room_id: roomId === 'unassigned' ? null : roomId,
             status,
             age_group: 'Adulto', // Defaulting for simple form, could be calculated
-        });
+        };
 
-        toast.success('Membro cadastrado com sucesso!');
-        router.push(`/${slug}/membros`);
+        const { success, error } = await addMember(payload as any);
+
+        setIsSubmitting(false);
+
+        if (success) {
+            toast.success('Membro cadastrado com sucesso!');
+            router.push(`/${slug}/membros`);
+        } else {
+            toast.error(error || 'Erro ao cadastrar membro.');
+        }
     };
 
     return (

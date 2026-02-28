@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { DollarSign, TrendingUp, TrendingDown, Plus, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Plus, ArrowUpRight, ArrowDownRight, Settings, Trash2, Edit2, Check, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,16 @@ import { useAuth } from '@/lib/auth-context';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { toast } from 'sonner';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const COLORS = ['#1A2C5B', '#C9A84C', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#F59E0B'];
 
@@ -25,8 +35,14 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 export default function FinanceiroPage() {
-    const { transactions, addTransaction } = useAuth();
+    const { transactions, addTransaction, categories, addCategory, updateCategory, deleteCategory } = useAuth();
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [manageDialogOpen, setManageDialogOpen] = useState(false);
+
+    // Category management states
+    const [newCatNames, setNewCatNames] = useState({ entrada: '', saida: '' });
+    const [editingCatId, setEditingCatId] = useState<string | null>(null);
+    const [editingCatName, setEditingCatName] = useState('');
 
     // Form states
     const [type, setType] = useState<'entrada' | 'saida'>('entrada');
@@ -34,6 +50,14 @@ export default function FinanceiroPage() {
     const [description, setDescription] = useState('');
     const [amount, setAmount] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Deletion states
+    const [catToDelete, setCatToDelete] = useState<string | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const filteredCategories = useMemo(() =>
+        categories.filter(c => c.type === type)
+        , [categories, type]);
 
     const incomes = transactions.filter(t => t.type === 'entrada');
     const expenses = transactions.filter(t => t.type === 'saida');
@@ -57,6 +81,11 @@ export default function FinanceiroPage() {
             toast.error('Preencha todos os campos obrigatórios.');
             return;
         }
+
+        // Find the category name from id if it was selected from list
+        // Actually, our category state holds the name currently in UI but we should use IDs or names.
+        // Looking at database schema, category is a text field. So we use names.
+
         addTransaction({
             type,
             category,
@@ -70,6 +99,41 @@ export default function FinanceiroPage() {
         setCategory('');
         setDescription('');
         setAmount('');
+    };
+
+    const handleAddCategory = async (typeToAdd: 'entrada' | 'saida') => {
+        const name = newCatNames[typeToAdd];
+        if (!name.trim()) return;
+        await addCategory({
+            name: name.trim(),
+            type: typeToAdd
+        });
+        setNewCatNames(prev => ({ ...prev, [typeToAdd]: '' }));
+    };
+
+    const handleUpdateCategory = async (id: string) => {
+        if (!editingCatName.trim()) return;
+        try {
+            await updateCategory(id, editingCatName.trim());
+            setEditingCatId(null);
+        } catch (err) {
+            console.error('Frontend error updating cat:', err);
+        }
+    };
+
+    const confirmDeleteCategory = async () => {
+        if (!catToDelete) return;
+        setIsDeleting(true);
+        try {
+            console.log('Disparando exclusão da categoria:', catToDelete);
+            await deleteCategory(catToDelete);
+            console.log('Exclusão concluída no frontend');
+        } catch (err) {
+            console.error('Erro ao chamar deleteCategory:', err);
+        } finally {
+            setIsDeleting(false);
+            setCatToDelete(null);
+        }
     };
 
     const monthlyData = [
@@ -86,58 +150,143 @@ export default function FinanceiroPage() {
                     <h1 className="text-2xl md:text-3xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Financeiro</h1>
                     <p className="text-muted-foreground mt-1">Controle de receitas e despesas</p>
                 </div>
-                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                    <DialogTrigger asChild>
-                        <Button size="sm" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
-                            <Plus className="h-4 w-4 mr-1" /> Nova Transação
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Nova Transação</DialogTitle>
-                        </DialogHeader>
-                        <form onSubmit={handleSaveTransaction} className="space-y-4">
-                            <div className="space-y-2">
-                                <Label>Tipo</Label>
-                                <Select value={type} onValueChange={(v: any) => setType(v)}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="entrada">Entrada</SelectItem>
-                                        <SelectItem value="saida">Saída</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Categoria</Label>
-                                <Select value={category} onValueChange={setCategory}>
-                                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="dizimo">Dízimo</SelectItem>
-                                        <SelectItem value="oferta">Oferta</SelectItem>
-                                        <SelectItem value="doacao">Doação</SelectItem>
-                                        <SelectItem value="aluguel">Aluguel</SelectItem>
-                                        <SelectItem value="energia">Energia</SelectItem>
-                                        <SelectItem value="manutencao">Manutenção</SelectItem>
-                                        <SelectItem value="eventos">Eventos</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Descrição</Label>
-                                <Input placeholder="Descrição da transação" value={description} onChange={e => setDescription(e.target.value)} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Valor (R$)</Label>
-                                <Input type="number" placeholder="0,00" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Data</Label>
-                                <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
-                            </div>
-                            <Button type="submit" className="w-full bg-secondary text-secondary-foreground">Registrar</Button>
-                        </form>
-                    </DialogContent>
-                </Dialog>
+                <div className="flex gap-2">
+                    <Dialog open={manageDialogOpen} onOpenChange={setManageDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button variant="outline" size="sm">
+                                <Settings className="h-4 w-4 mr-1" /> Categorias
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>Gerenciar Categorias</DialogTitle>
+                                <CardDescription>Exclua categorias que não são mais necessárias</CardDescription>
+                            </DialogHeader>
+                            <Tabs defaultValue="entrada">
+                                <TabsList className="w-full">
+                                    <TabsTrigger value="entrada" className="flex-1">Entradas</TabsTrigger>
+                                    <TabsTrigger value="saida" className="flex-1">Saídas</TabsTrigger>
+                                </TabsList>
+                                {(['entrada', 'saida'] as const).map(t => (
+                                    <TabsContent key={t} value={t} className="mt-4 space-y-4">
+                                        <div className="flex gap-2 p-1">
+                                            <Input
+                                                placeholder="Nome da nova categoria..."
+                                                value={newCatNames[t]}
+                                                onChange={e => setNewCatNames(prev => ({ ...prev, [t]: e.target.value }))}
+                                                className="flex-1 h-9 text-sm"
+                                            />
+                                            <Button type="button" size="sm" onClick={() => handleAddCategory(t)}>
+                                                <Plus className="h-4 w-4 mr-1" /> Add
+                                            </Button>
+                                        </div>
+
+                                        <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+                                            {categories.filter(c => c.type === t).map(cat => (
+                                                <div key={cat.id} className="flex items-center justify-between p-2 rounded-lg border bg-muted/30 group">
+                                                    {editingCatId === cat.id ? (
+                                                        <div className="flex-1 flex gap-2 items-center">
+                                                            <Input
+                                                                size={1}
+                                                                value={editingCatName}
+                                                                onChange={e => setEditingCatName(e.target.value)}
+                                                                className="h-8 text-sm flex-1"
+                                                                autoFocus
+                                                            />
+                                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-emerald-600" onClick={() => handleUpdateCategory(cat.id)}>
+                                                                <Check className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" onClick={() => setEditingCatId(null)}>
+                                                                <X className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <span className="text-sm font-medium">{cat.name}</span>
+                                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 text-blue-500"
+                                                                    onClick={() => {
+                                                                        setEditingCatId(cat.id);
+                                                                        setEditingCatName(cat.name);
+                                                                    }}
+                                                                >
+                                                                    <Edit2 className="h-4 w-4" />
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 text-red-500"
+                                                                    onClick={() => setCatToDelete(cat.id)}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </TabsContent>
+                                ))}
+                            </Tabs>
+                        </DialogContent>
+                    </Dialog>
+
+                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button size="sm" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
+                                <Plus className="h-4 w-4 mr-1" /> Nova Transação
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Nova Transação</DialogTitle>
+                            </DialogHeader>
+                            <form onSubmit={handleSaveTransaction} className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label>Tipo</Label>
+                                    <Select value={type} onValueChange={(v: any) => {
+                                        setType(v);
+                                        setCategory(''); // Reset category when type changes
+                                    }}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="entrada">Entrada</SelectItem>
+                                            <SelectItem value="saida">Saída</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Categoria</Label>
+                                    <Select value={category} onValueChange={setCategory}>
+                                        <SelectTrigger className="w-full"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                        <SelectContent>
+                                            {filteredCategories.map(cat => (
+                                                <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Descrição</Label>
+                                    <Input placeholder="Descrição da transação" value={description} onChange={e => setDescription(e.target.value)} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Valor (R$)</Label>
+                                    <Input type="number" placeholder="0,00" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Data</Label>
+                                    <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+                                </div>
+                                <Button type="submit" className="w-full bg-secondary text-secondary-foreground">Registrar</Button>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
             </div>
 
             {/* Balance Cards */}
@@ -304,6 +453,32 @@ export default function FinanceiroPage() {
                     </Card>
                 </TabsContent>
             </Tabs>
+            {/* Modal de Confirmação de Exclusão */}
+            <AlertDialog open={!!catToDelete} onOpenChange={(open) => !open && setCatToDelete(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Tem certeza que deseja excluir?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta categoria será removida. As transações que já usam esta categoria
+                            <span className="font-semibold text-foreground"> não </span> serão excluídas,
+                            mas você não poderá selecionar esta categoria para novos lançamentos.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={(e) => {
+                                e.preventDefault();
+                                confirmDeleteCategory();
+                            }}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? 'Excluindo...' : 'Sim, Excluir'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

@@ -58,7 +58,7 @@ function UserDialog({
     open: boolean;
     onOpenChange: (v: boolean) => void;
     user?: User | null;
-    onSave: (data: { name: string; email: string; role: UserRole }) => void;
+    onSave: (data: { name: string; email: string; role: UserRole, password?: string }) => void;
 }) {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -87,7 +87,14 @@ function UserDialog({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!name || !email) { toast.error('Preencha todos os campos.'); return; }
-        onSave({ name, email, role });
+
+        onSave({
+            name,
+            email,
+            role,
+            ...(user ? {} : { password: password || undefined })
+        });
+
         // Clear explicitly after success
         setName('');
         setEmail('');
@@ -272,6 +279,83 @@ function PermissionsDialog({
     );
 }
 
+function ChurchDataForm() {
+    const { session, updateChurchData } = useAuth();
+    const [name, setName] = useState(session?.church.name || '');
+    const [cnpj, setCnpj] = useState(session?.church.cnpj || '');
+    const [pastor, setPastor] = useState(session?.church.pastor || '');
+    const [address, setAddress] = useState(session?.church.address || '');
+    const [city, setCity] = useState(session?.church.city || '');
+    const [phone, setPhone] = useState(session?.church.phone || '');
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        if (session?.church) {
+            setName(session.church.name || '');
+            setCnpj(session.church.cnpj || '');
+            setPastor(session.church.pastor || '');
+            setAddress(session.church.address || '');
+            setCity(session.church.city || '');
+            setPhone(session.church.phone || '');
+        }
+    }, [session?.church]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!session?.church.id) return;
+        setIsSaving(true);
+        try {
+            const { success, error } = await updateChurchData(session.church.id, {
+                name, cnpj, pastor, address, city, phone
+            });
+            if (success) {
+                toast.success('Dados atualizados com sucesso!');
+            } else {
+                toast.error(error || 'Erro ao atualizar dados da igreja.');
+            }
+        } catch (err: any) {
+            console.error('Submit error:', err);
+            toast.error('Erro ao conectar com o servidor.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="space-y-4 max-w-lg">
+            <div className="space-y-2">
+                <Label>Nome da Igreja</Label>
+                <Input value={name} onChange={e => setName(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+                <Label>CNPJ</Label>
+                <Input value={cnpj} onChange={e => setCnpj(e.target.value)} placeholder="00.000.000/0001-00" />
+            </div>
+            <div className="space-y-2">
+                <Label>Pastor Titular</Label>
+                <Input value={pastor} onChange={e => setPastor(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+                <Label>Endereço</Label>
+                <Input value={address} onChange={e => setAddress(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                    <Label>Cidade</Label>
+                    <Input value={city} onChange={e => setCity(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                    <Label>Telefone</Label>
+                    <Input value={phone} onChange={e => setPhone(e.target.value)} />
+                </div>
+            </div>
+            <Button type="submit" disabled={isSaving} className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
+                <Save className="h-4 w-4 mr-1" /> {isSaving ? 'Salvando...' : 'Salvar Alterações'}
+            </Button>
+        </form>
+    );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────
 export default function ConfiguracoesPage() {
     const { session, users, rooms, rolePermissions, addUser, updateUser, deleteUser, addRoom, updateRoom, deleteRoom, updateRolePermission } = useAuth();
@@ -293,36 +377,71 @@ export default function ConfiguracoesPage() {
     // ─── User handlers
     const handleAddUser = () => { setEditingUser(null); setUserDialogOpen(true); };
     const handleEditUser = (u: User) => { setEditingUser(u); setUserDialogOpen(true); };
-    const handleSaveUser = (data: { name: string; email: string; role: UserRole }) => {
-        if (editingUser) {
-            updateUser(editingUser.id, data);
-            toast.success('Usuário atualizado com sucesso!');
-        } else {
-            addUser(data);
-            toast.success('Usuário adicionado com sucesso!');
+    const handleSaveUser = async (data: { name: string; email: string; role: UserRole, password?: string }) => {
+        try {
+            if (editingUser) {
+                // Remove password from payload when updating, just in case
+                const { password, ...updateData } = data;
+                await updateUser(editingUser.id, updateData);
+                toast.success('Usuário atualizado com sucesso!');
+            } else {
+                await addUser(data);
+                toast.success('Usuário adicionado com sucesso!');
+            }
+            setUserDialogOpen(false);
+        } catch (error) {
+            // Error toast handled by AuthContext
         }
     };
     const handleDeleteUser = (id: string) => { setDeleteUserId(id); };
-    const confirmDeleteUser = () => {
-        if (deleteUserId) { deleteUser(deleteUserId); toast.success('Usuário removido.'); setDeleteUserId(null); }
+    const confirmDeleteUser = async () => {
+        if (deleteUserId) {
+            try {
+                await deleteUser(deleteUserId);
+                toast.success('Usuário removido.');
+                setDeleteUserId(null);
+            } catch (error) {
+                // Error toast handled by AuthContext
+            }
+        }
     };
+
 
     // ─── Room handlers
     const handleAddRoom = () => { setEditingRoom(null); setRoomDialogOpen(true); };
     const handleEditRoom = (r: Room) => { setEditingRoom(r); setRoomDialogOpen(true); };
-    const handleSaveRoom = (data: { name: string; age_group: string }) => {
+    const handleSaveRoom = async (data: { name: string; age_group: string }) => {
         const typedData = { name: data.name, age_group: data.age_group as import('@/lib/types').AgeGroup };
+        let successPath = false;
+        let errorMessage = '';
+
         if (editingRoom) {
-            updateRoom(editingRoom.id, typedData);
-            toast.success('Sala atualizada com sucesso!');
+            const { success, error } = await updateRoom(editingRoom.id, typedData);
+            successPath = success;
+            errorMessage = error || 'Erro ao atualizar sala.';
         } else {
-            addRoom(typedData);
-            toast.success('Sala criada com sucesso!');
+            const { success, error } = await addRoom(typedData);
+            successPath = success;
+            errorMessage = error || 'Erro ao criar sala.';
+        }
+
+        if (successPath) {
+            toast.success(editingRoom ? 'Sala atualizada com sucesso!' : 'Sala criada com sucesso!');
+        } else {
+            toast.error(errorMessage);
         }
     };
     const handleDeleteRoom = (id: string) => { setDeleteRoomId(id); };
-    const confirmDeleteRoom = () => {
-        if (deleteRoomId) { deleteRoom(deleteRoomId); toast.success('Sala removida.'); setDeleteRoomId(null); }
+    const confirmDeleteRoom = async () => {
+        if (deleteRoomId) {
+            const { success, error } = await deleteRoom(deleteRoomId);
+            if (success) {
+                toast.success('Sala removida com sucesso!');
+            } else {
+                toast.error(error || 'Erro ao remover sala.');
+            }
+            setDeleteRoomId(null);
+        }
     };
 
     // ─── Permission handlers
@@ -394,7 +513,15 @@ export default function ConfiguracoesPage() {
                                             </TableCell>
                                             <TableCell>
                                                 <button
-                                                    onClick={() => { updateUser(user.id, { is_active: !user.is_active }); toast.success(`Usuário ${user.is_active ? 'desativado' : 'ativado'}.`); }}
+                                                    onClick={async () => {
+                                                        const newStatus = !user.is_active;
+                                                        try {
+                                                            await updateUser(user.id, { is_active: newStatus });
+                                                            toast.success(`Usuário ${newStatus ? 'ativado' : 'desativado'} com sucesso.`);
+                                                        } catch (error) {
+                                                            // Error toast handled by AuthContext
+                                                        }
+                                                    }}
                                                     className="flex items-center gap-1.5"
                                                     title="Clique para alternar"
                                                 >
@@ -406,6 +533,7 @@ export default function ConfiguracoesPage() {
                                                     </span>
                                                 </button>
                                             </TableCell>
+
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1">
                                                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditUser(user)} title="Editar">
@@ -548,37 +676,7 @@ export default function ConfiguracoesPage() {
                             <CardDescription>Informações principais visíveis para membros e relatórios.</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <form onSubmit={(e) => { e.preventDefault(); toast.success('Dados atualizados!'); }} className="space-y-4 max-w-lg">
-                                <div className="space-y-2">
-                                    <Label>Nome da Igreja</Label>
-                                    <Input defaultValue={session?.church.name} />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>CNPJ</Label>
-                                    <Input defaultValue={session?.church.cnpj} placeholder="00.000.000/0001-00" />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Pastor Titular</Label>
-                                    <Input defaultValue={session?.church.pastor} />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Endereço</Label>
-                                    <Input defaultValue={session?.church.address} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-2">
-                                        <Label>Cidade</Label>
-                                        <Input defaultValue={session?.church.city} />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label>Telefone</Label>
-                                        <Input defaultValue={session?.church.phone} />
-                                    </div>
-                                </div>
-                                <Button type="submit" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
-                                    <Save className="h-4 w-4 mr-1" /> Salvar Alterações
-                                </Button>
-                            </form>
+                            <ChurchDataForm />
                         </CardContent>
                     </Card>
                 </TabsContent>

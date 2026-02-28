@@ -60,7 +60,7 @@ export default function SuperAdminPage() {
         toast.success(`Igreja "${name}" ${!currentStatus ? 'ativada' : 'desativada'}!`);
     };
 
-    const handleChangePassword = () => {
+    const handleChangePassword = async () => {
         if (!newPassword || !confirmPassword) {
             toast.error('Preencha todos os campos');
             return;
@@ -73,7 +73,7 @@ export default function SuperAdminPage() {
             toast.error('As senhas não coincidem');
             return;
         }
-        const success = changePassword(currentPassword, newPassword);
+        const success = await changePassword(currentPassword, newPassword);
         if (success) {
             toast.success('Senha alterada com sucesso!');
             setPasswordDialogOpen(false);

@@ -14,7 +14,8 @@ export interface NewChurchData { churchName: string; slug: string; pastor: strin
 export interface NewVisitorData { name: string; address: string; phone: string; room_id: string; room_name: string; session_date: string; }
 export interface NewMemberData extends Omit<Member, 'id' | 'church_id' | 'created_at'> { }
 export interface NewTransactionData extends Omit<FinancialTransaction, 'id' | 'church_id' | 'created_at'> { }
-export interface NewAttendanceSessionData extends Omit<AttendanceSession, 'id' | 'church_id' | 'created_at'> { }
+export interface NewAttendanceSessionData extends Omit<AttendanceSession, 'id' | 'church_id' | 'created_at'> { id?: string; }
+export interface NewCategoryData { name: string; type: TransactionType; }
 
 export interface Visitor {
     id: string;
@@ -120,6 +121,14 @@ export interface FinancialTransaction {
     description: string;
     amount: number;
     transaction_date: string;
+    created_at: string;
+}
+
+export interface FinancialCategory {
+    id: string;
+    church_id: string;
+    name: string;
+    type: TransactionType;
     created_at: string;
 }
 

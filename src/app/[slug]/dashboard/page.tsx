@@ -1,22 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Users, ClipboardCheck, DollarSign, TrendingUp, AlertTriangle, Cake, ArrowUpRight, ArrowDownRight, UserCheck, MapPin, Phone, Clock as ClockIcon, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { mockMembers, mockMonthlyAttendance, mockRoomAttendance, mockFinancialSummary, mockBirthdays, mockAbsentAlerts } from '@/lib/mock-data';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useAuth } from '@/lib/auth-context';
 
 const COLORS = ['#1A2C5B', '#C9A84C', '#3B82F6', '#8B5CF6', '#EC4899'];
-
-const pieData = [
-    { name: 'Presentes', value: 180, fill: '#C9A84C' },
-    { name: 'Ausentes', value: 45, fill: '#1A2C5B' },
-];
 
 const chartConfig = {
     present: { label: 'Presentes', color: '#C9A84C' },
@@ -25,7 +19,7 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 export default function DashboardPage() {
-    const { session, visitors, hasRole } = useAuth();
+    const { session, visitors, hasRole, members, transactions, attendanceSessions } = useAuth();
     const [visitorListOpen, setVisitorListOpen] = useState(false);
 
     const today = new Date().toISOString().split('T')[0];
@@ -33,14 +27,74 @@ export default function DashboardPage() {
 
     const isAdminOrPastor = hasRole('admin', 'pastor');
 
-    const activeMembers = mockMembers.filter(m => m.status === 'ativo').length;
-    const totalMembers = mockMembers.length;
+    const activeMembers = members.filter(m => m.status === 'ativo').length;
+    const totalMembers = members.length;
+
+    // Compute financial summary from transactions
+    const financialSummary = useMemo(() => {
+        const totalIncome = transactions.filter(t => t.type === 'entrada').reduce((sum, t) => sum + Number(t.amount), 0);
+        const totalExpense = transactions.filter(t => t.type === 'saida').reduce((sum, t) => sum + Number(t.amount), 0);
+        return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
+    }, [transactions]);
+
+    // Compute attendance data from sessions
+    const lastSession = attendanceSessions.length > 0 ? attendanceSessions[0] : null;
+    const lastPresent = lastSession?.total_present ?? 0;
+    const lastAbsent = lastSession?.total_absent ?? 0;
+    const lastTotal = lastPresent + lastAbsent;
+    const lastPercentage = lastTotal > 0 ? Math.round((lastPresent / lastTotal) * 100) : 0;
+
+    const pieData = [
+        { name: 'Presentes', value: lastPresent, fill: '#C9A84C' },
+        { name: 'Ausentes', value: lastAbsent, fill: '#1A2C5B' },
+    ];
+
+    // Build monthly attendance chart data from sessions
+    const monthlyAttendance = useMemo(() => {
+        const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+        const grouped: Record<string, { present: number; absent: number }> = {};
+
+        // Ensure at least early months are represented or just the months with data
+        attendanceSessions.forEach(s => {
+            const d = new Date(s.session_date);
+            const key = months[d.getMonth()];
+            if (!grouped[key]) grouped[key] = { present: 0, absent: 0 };
+            grouped[key].present += s.total_present;
+            grouped[key].absent += s.total_absent;
+        });
+
+        const data = Object.entries(grouped).map(([month, data]) => ({ month, ...data }));
+        return data.length > 0 ? data : months.slice(0, 6).map(m => ({ month: m, present: 0, absent: 0 }));
+    }, [attendanceSessions]);
+
+    // Build room attendance chart data
+    const roomAttendance = useMemo(() => {
+        const grouped: Record<string, { present: number; absent: number }> = {};
+        attendanceSessions.forEach(s => {
+            const room = s.room_name || 'Sem sala';
+            if (!grouped[room]) grouped[room] = { present: 0, absent: 0 };
+            grouped[room].present += s.total_present;
+            grouped[room].absent += s.total_absent;
+        });
+        return Object.entries(grouped).map(([room, data]) => ({ room, ...data }));
+    }, [attendanceSessions]);
+
+    // Birthdays this month
+    const birthdays = useMemo(() => {
+        const currentMonth = new Date().getMonth();
+        return members
+            .filter(m => {
+                if (!m.birth_date) return false;
+                return new Date(m.birth_date).getMonth() === currentMonth;
+            })
+            .slice(0, 5);
+    }, [members]);
 
     const stats = [
-        { title: 'Total de Membros', value: totalMembers, subtitle: `${activeMembers} ativos`, icon: Users, trend: '+5%', up: true, color: 'text-blue-500' },
-        { title: 'Presença Último Culto', value: '80%', subtitle: '180 de 225', icon: ClipboardCheck, trend: '+2%', up: true, color: 'text-emerald-500' },
-        { title: 'Receita do Mês', value: 'R$ 7.080', subtitle: 'Dízimos e ofertas', icon: DollarSign, trend: '-12%', up: false, color: 'text-amber-500' },
-        { title: 'Saldo Atual', value: `R$ ${mockFinancialSummary.balance.toLocaleString('pt-BR')}`, subtitle: 'Receitas - Despesas', icon: TrendingUp, trend: '', up: mockFinancialSummary.balance >= 0, color: mockFinancialSummary.balance >= 0 ? 'text-emerald-500' : 'text-red-500' },
+        { title: 'Total de Membros', value: totalMembers, subtitle: `${activeMembers} ativos`, icon: Users, trend: '', up: true, color: 'text-blue-500' },
+        { title: 'Presença Último Culto', value: `${lastPercentage}%`, subtitle: `${lastPresent} de ${lastTotal}`, icon: ClipboardCheck, trend: '', up: true, color: 'text-emerald-500' },
+        { title: 'Receita do Mês', value: `R$ ${financialSummary.totalIncome.toLocaleString('pt-BR')}`, subtitle: 'Dízimos e ofertas', icon: DollarSign, trend: '', up: true, color: 'text-amber-500' },
+        { title: 'Saldo Atual', value: `R$ ${financialSummary.balance.toLocaleString('pt-BR')}`, subtitle: 'Receitas - Despesas', icon: TrendingUp, trend: '', up: financialSummary.balance >= 0, color: financialSummary.balance >= 0 ? 'text-emerald-500' : 'text-red-500' },
     ];
 
     return (
@@ -120,10 +174,10 @@ export default function DashboardPage() {
                         <CardTitle className="text-base">Presença por Mês</CardTitle>
                         <CardDescription>Últimos 6 meses</CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        <div className="h-[280px]">
-                            <ChartContainer config={chartConfig}>
-                                <LineChart data={mockMonthlyAttendance}>
+                    <CardContent className="min-h-[320px]">
+                        <div className="h-[280px] w-full">
+                            <ChartContainer config={chartConfig} className="h-full w-full">
+                                <LineChart data={monthlyAttendance} margin={{ left: 12, right: 12 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                                     <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
                                     <YAxis tickLine={false} axisLine={false} tickMargin={8} />
@@ -142,10 +196,10 @@ export default function DashboardPage() {
                         <CardTitle className="text-base">Presença por Sala</CardTitle>
                         <CardDescription>Último culto</CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        <div className="h-[280px]">
-                            <ChartContainer config={chartConfig}>
-                                <BarChart data={mockRoomAttendance}>
+                    <CardContent className="min-h-[320px]">
+                        <div className="h-[280px] w-full">
+                            <ChartContainer config={chartConfig} className="h-full w-full">
+                                <BarChart data={roomAttendance} margin={{ left: 12, right: 12 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                                     <XAxis dataKey="room" tickLine={false} axisLine={false} tickMargin={8} />
                                     <YAxis tickLine={false} axisLine={false} tickMargin={8} />
@@ -194,15 +248,7 @@ export default function DashboardPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
-                            {mockAbsentAlerts.map((alert) => (
-                                <div key={alert.member.id} className="flex items-center justify-between p-3 rounded-lg bg-destructive/5 border border-destructive/10">
-                                    <div>
-                                        <p className="text-sm font-medium">{alert.member.full_name}</p>
-                                        <p className="text-xs text-muted-foreground">{alert.consecutive_absences} faltas consecutivas</p>
-                                    </div>
-                                    <Badge variant="destructive" className="text-xs">{alert.consecutive_absences}x</Badge>
-                                </div>
-                            ))}
+                            <p className="text-sm text-muted-foreground text-center py-4">Nenhuma falta consecutiva registrada.</p>
                         </div>
                     </CardContent>
                 </Card>
@@ -217,12 +263,12 @@ export default function DashboardPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
-                            {mockBirthdays.length > 0 ? mockBirthdays.map((member) => (
+                            {birthdays.length > 0 ? birthdays.map((member) => (
                                 <div key={member.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                                     <div>
                                         <p className="text-sm font-medium">{member.full_name}</p>
                                         <p className="text-xs text-muted-foreground">
-                                            {new Date(member.birth_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
+                                            {member.birth_date ? new Date(member.birth_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' }) : ''}
                                         </p>
                                     </div>
                                     <span className="text-lg">🎂</span>

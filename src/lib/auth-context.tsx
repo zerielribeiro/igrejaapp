@@ -1,42 +1,15 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode, useRef } from 'react';
 import {
     AuthSession, User, Room, Church, UserRole, Visitor,
-    Member, FinancialTransaction, AttendanceSession,
+    Member, FinancialTransaction, AttendanceSession, FinancialCategory,
     NewUserData, NewRoomData, NewVisitorData, NewChurchData,
-    NewMemberData, NewTransactionData, NewAttendanceSessionData
+    NewMemberData, NewTransactionData, NewAttendanceSessionData, NewCategoryData
 } from './types';
-import {
-    mockUsers, mockChurches, mockRooms, mockMembers, mockTransactions, mockAttendanceSessions
-} from './mock-data';
 import { toast } from 'sonner';
-
-// ─── localStorage keys ────────────────────────────────────────────
-const LS_SESSION = 'ig_session';
-const LS_PERMISSIONS = 'ig_permissions';
-const LS_USERS = 'ig_users';
-const LS_CHURCHES = 'ig_churches';
-const LS_ROOMS = 'ig_rooms';
-const LS_VISITORS = 'ig_visitors';
-const LS_MEMBERS = 'ig_members';
-const LS_TRANSACTIONS = 'ig_transactions';
-const LS_ATTENDANCE = 'ig_attendance';
-
-function lsGet<T>(key: string, fallback: T): T {
-    if (typeof window === 'undefined') return fallback;
-    try {
-        const raw = localStorage.getItem(key);
-        return raw ? (JSON.parse(raw) as T) : fallback;
-    } catch {
-        return fallback;
-    }
-}
-
-function lsSet(key: string, value: unknown) {
-    if (typeof window === 'undefined') return;
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota */ }
-}
+import { createClient } from './supabase/client';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 // ─── Permission Groups ────────────────────────────────────────────
 export interface RolePermission {
@@ -68,8 +41,6 @@ export const defaultRolePermissions: RolePermission[] = [
     },
 ];
 
-// Types moved to types.ts
-
 interface AuthContextType {
     session: AuthSession | null;
     users: User[];
@@ -77,21 +48,22 @@ interface AuthContextType {
     rolePermissions: RolePermission[];
     login: (email: string, password: string, slug?: string) => Promise<boolean>;
     logout: () => void;
-    registerChurch: (data: NewChurchData) => void;
+    registerChurch: (data: NewChurchData) => Promise<boolean>;
     isLoading: boolean;
     hasRole: (...roles: UserRole[]) => boolean;
-    changePassword: (currentPassword: string, newPassword: string) => boolean;
+    changePassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
     // Churches (Super Admin)
     churches: Church[];
     updateChurchStatus: (id: string, isActive: boolean) => void;
+    updateChurchData: (id: string, data: Partial<Church>) => Promise<{ success: boolean; error?: string }>;
     // Users CRUD
     addUser: (data: NewUserData) => void;
     updateUser: (id: string, data: Partial<User>) => void;
     deleteUser: (id: string) => void;
     // Rooms CRUD
-    addRoom: (data: NewRoomData) => void;
-    updateRoom: (id: string, data: Partial<Room>) => void;
-    deleteRoom: (id: string) => void;
+    addRoom: (data: NewRoomData) => Promise<{ success: boolean, error?: string }>;
+    updateRoom: (id: string, data: Partial<Room>) => Promise<{ success: boolean, error?: string }>;
+    deleteRoom: (id: string) => Promise<{ success: boolean, error?: string }>;
     // Permissions CRUD
     updateRolePermission: (role: UserRole, modules: Record<string, boolean>) => void;
     // Visitors
@@ -99,79 +71,236 @@ interface AuthContextType {
     addVisitor: (data: NewVisitorData) => void;
     // Members
     members: Member[];
-    addMember: (data: NewMemberData) => void;
+    addMember: (data: NewMemberData) => Promise<{ success: boolean, error?: string }>;
     updateMember: (id: string, data: Partial<Member>) => void;
     removeMember: (id: string) => void;
     // Financials
     transactions: FinancialTransaction[];
     addTransaction: (data: NewTransactionData) => void;
+    categories: FinancialCategory[];
+    addCategory: (data: NewCategoryData) => Promise<void>;
+    updateCategory: (id: string, name: string) => Promise<void>;
+    deleteCategory: (id: string) => Promise<void>;
     // Attendance
     attendanceSessions: AttendanceSession[];
-    addAttendanceSession: (data: NewAttendanceSessionData) => void;
+    saveAttendanceSession: (data: NewAttendanceSessionData) => Promise<AttendanceSession | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// ─── Helper: Map DB row to app type ────────────────────────────────
+function mapProfile(row: Record<string, unknown>): User {
+    return {
+        id: row.id as string,
+        church_id: (row.church_id as string) || '',
+        name: row.name as string,
+        email: row.email as string,
+        role: row.role as UserRole,
+        is_active: row.is_active as boolean,
+        avatar: row.avatar as string | undefined,
+        created_at: row.created_at as string,
+    };
+}
+
+function mapChurch(row: Record<string, unknown>): Church {
+    return {
+        id: row.id as string,
+        name: row.name as string,
+        slug: row.slug as string,
+        cnpj: (row.cnpj as string) || '',
+        city: (row.city as string) || '',
+        state: (row.state as string) || '',
+        address: (row.address as string) || '',
+        phone: (row.phone as string) || '',
+        pastor: (row.pastor as string) || '',
+        admin_name: (row.admin_name as string) || '',
+        admin_email: (row.admin_email as string) || '',
+        logo: row.logo as string | undefined,
+        plan: (row.plan as Church['plan']) || 'free',
+        is_active: row.is_active as boolean,
+        created_at: row.created_at as string,
+        members_count: (row.members_count as number) || 0,
+    };
+}
+
 // ─── Provider ─────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: ReactNode }) {
-    // ── Hydrate from localStorage (runs only on client) ───────────
-    const [session, setSession] = useState<AuthSession | null>(() =>
-        lsGet<AuthSession | null>(LS_SESSION, null)
-    );
-    const [isLoading, setIsLoading] = useState(false);
+    const [supabase] = useState<SupabaseClient>(() => createClient());
+    const [session, setSession] = useState<AuthSession | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
 
-    const [allUsers, setAllUsers] = useState<User[]>(() =>
-        lsGet<User[]>(LS_USERS, [...mockUsers])
-    );
-    const [allChurches, setAllChurches] = useState<Church[]>(() =>
-        lsGet<Church[]>(LS_CHURCHES, [...mockChurches])
-    );
-    const [allRooms, setAllRooms] = useState<Room[]>(() =>
-        lsGet<Room[]>(LS_ROOMS, [...mockRooms])
-    );
-    const [allVisitors, setAllVisitors] = useState<Visitor[]>(() =>
-        lsGet<Visitor[]>(LS_VISITORS, [])
-    );
-    const [allMembers, setAllMembers] = useState<Member[]>(() =>
-        lsGet<Member[]>(LS_MEMBERS, [...mockMembers])
-    );
-    const [allTransactions, setAllTransactions] = useState<FinancialTransaction[]>(() =>
-        lsGet<FinancialTransaction[]>(LS_TRANSACTIONS, [...mockTransactions])
-    );
-    const [allAttendanceSessions, setAllAttendanceSessions] = useState<AttendanceSession[]>(() =>
-        lsGet<AttendanceSession[]>(LS_ATTENDANCE, [...mockAttendanceSessions])
-    );
-    const [rolePermissions, setRolePermissions] = useState<RolePermission[]>(() =>
-        lsGet<RolePermission[]>(LS_PERMISSIONS, defaultRolePermissions)
-    );
+    // Data states
+    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [allChurches, setAllChurches] = useState<Church[]>([]);
+    const [allRooms, setAllRooms] = useState<Room[]>([]);
+    const [allVisitors, setAllVisitors] = useState<Visitor[]>([]);
+    const [allMembers, setAllMembers] = useState<Member[]>([]);
+    const [allTransactions, setAllTransactions] = useState<FinancialTransaction[]>([]);
+    const [allCategories, setAllCategories] = useState<FinancialCategory[]>([]);
+    const [allAttendanceSessions, setAllAttendanceSessions] = useState<AttendanceSession[]>([]);
+    const [rolePermissions, setRolePermissions] = useState<RolePermission[]>(defaultRolePermissions);
+    const loadingIds = useRef<Set<string>>(new Set());
 
-    // ── Persist to localStorage on every change ───────────────────
-    useEffect(() => { lsSet(LS_SESSION, session); }, [session]);
-    useEffect(() => { lsSet(LS_PERMISSIONS, rolePermissions); }, [rolePermissions]);
-    useEffect(() => { lsSet(LS_USERS, allUsers); }, [allUsers]);
-    useEffect(() => { lsSet(LS_CHURCHES, allChurches); }, [allChurches]);
-    useEffect(() => { lsSet(LS_ROOMS, allRooms); }, [allRooms]);
-    useEffect(() => { lsSet(LS_VISITORS, allVisitors); }, [allVisitors]);
-    useEffect(() => { lsSet(LS_MEMBERS, allMembers); }, [allMembers]);
-    useEffect(() => { lsSet(LS_TRANSACTIONS, allTransactions); }, [allTransactions]);
-    useEffect(() => { lsSet(LS_ATTENDANCE, allAttendanceSessions); }, [allAttendanceSessions]);
-
-    // ── Sync session user/church if allUsers or allChurches changed
-    // (e.g. admin updated their own name → session reflects instantly)
+    // ── Load session on mount ─────────────────────────────────────
     useEffect(() => {
-        if (!session) return;
-        const freshUser = allUsers.find(u => u.id === session.user.id);
-        const freshChurch = allChurches.find(c => c.id === session.church.id);
-        if (!freshUser || !freshChurch) return;
-        const userChanged = JSON.stringify(freshUser) !== JSON.stringify(session.user);
-        const churchChanged = JSON.stringify(freshChurch) !== JSON.stringify(session.church);
-        if (userChanged || churchChanged) {
-            setSession({ user: freshUser, church: freshChurch });
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [allUsers, allChurches]);
+        const initSession = async () => {
+            // Safety timeout: If session restoration takes more than 5 seconds, 
+            // release the loading state so the user can at least try to log in manually.
+            const timeoutId = setTimeout(() => {
+                setIsLoading(false);
+                console.log('Session initialization timed out, releasing loading state.');
+            }, 5000);
 
-    // ── Derived state for current church (Memoized for performance) ──
+            try {
+                const { data: { session: authSession } } = await supabase.auth.getSession();
+                if (authSession?.user) {
+                    await loadUserSession(authSession.user.id);
+                }
+            } catch (err) {
+                console.error('Error loading session:', err);
+            } finally {
+                clearTimeout(timeoutId);
+                setIsLoading(false);
+            }
+        };
+        initSession();
+
+        // Listen for auth changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, authSession) => {
+            if (event === 'SIGNED_IN' && authSession?.user) {
+                await loadUserSession(authSession.user.id);
+            } else if (event === 'SIGNED_OUT') {
+                setSession(null);
+                clearAllData();
+            }
+        });
+
+        return () => subscription.unsubscribe();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const clearAllData = () => {
+        setAllUsers([]);
+        setAllChurches([]);
+        setAllRooms([]);
+        setAllVisitors([]);
+        setAllMembers([]);
+        setAllTransactions([]);
+        setAllCategories([]);
+        setAllAttendanceSessions([]);
+        setRolePermissions(defaultRolePermissions);
+    };
+
+    const loadUserSession = async (userId: string): Promise<boolean> => {
+        if (loadingIds.current.has(userId)) return true;
+        loadingIds.current.add(userId);
+
+        try {
+            // Reduced noise
+            // console.log('Fetching profile for user:', userId);
+            // 1. Get profile
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            if (profileError || !profile) {
+                console.error('Profile fetch error:', profileError);
+                if (profileError?.message?.includes('Failed to fetch') || profileError?.message?.includes('timeout')) {
+                    toast.error('Erro de conexão com o servidor. Verifique sua internet.');
+                } else if (profileError) {
+                    toast.error('Erro ao carregar perfil: ' + profileError.message);
+                }
+                return false;
+            }
+
+            const user = mapProfile(profile);
+            // console.log('Profile loaded:', user.name);
+
+            // 2. Get church
+            let church: Church;
+            if (user.role === 'super_admin') {
+                church = {
+                    id: 'system', name: 'Sistema Central', slug: 'superadmin',
+                    cnpj: '', city: '', state: '', address: '', phone: '',
+                    pastor: '', admin_name: 'Super Admin', admin_email: user.email,
+                    plan: 'premium', is_active: true, created_at: '', members_count: 0,
+                };
+                // Load all churches for super admin
+                const { data: churches, error: chError } = await supabase.from('churches').select('*');
+                if (chError) console.error('Error loading churches for super admin:', chError);
+                if (churches) setAllChurches(churches.map(mapChurch));
+            } else {
+                const { data: churchData, error: churchError } = await supabase
+                    .from('churches')
+                    .select('*')
+                    .eq('id', user.church_id)
+                    .single();
+
+                if (churchError || !churchData) {
+                    console.error('Church not found:', churchError);
+                    if (churchError?.message?.includes('fetch')) {
+                        toast.error('Erro de rede ao carregar dados da igreja.');
+                    } else {
+                        toast.error('Igreja não encontrada para este usuário.');
+                    }
+                    return false;
+                }
+                church = mapChurch(churchData);
+                setAllChurches([church]);
+            }
+
+            setSession({ user, church });
+
+            // 3. Load church data
+            await loadChurchData(user.church_id, user.role);
+            return true;
+        } catch (err: any) {
+            console.error('Exception in loadUserSession:', err);
+            const isConn = err?.message?.includes('fetch') || err?.message?.includes('Network');
+            toast.error(isConn
+                ? 'Sua conexão com o banco de dados falhou.'
+                : 'Erro ao processar sessão do usuário.');
+            return false;
+        } finally {
+            loadingIds.current.delete(userId);
+        }
+    };
+
+    const loadChurchData = async (churchId: string, role: UserRole) => {
+        if (role === 'super_admin') {
+            // Super admin loads all profiles
+            const { data: profiles } = await supabase.from('profiles').select('*');
+            if (profiles) setAllUsers(profiles.map(mapProfile));
+            return;
+        }
+
+        // Load data for the user's church
+        const [profilesRes, roomsRes, membersRes, transactionsRes, attendanceRes, visitorsRes, permissionsRes, categoriesRes] = await Promise.all([
+            supabase.from('profiles').select('*').eq('church_id', churchId),
+            supabase.from('rooms').select('*').eq('church_id', churchId),
+            supabase.from('members').select('*').eq('church_id', churchId),
+            supabase.from('financial_transactions').select('*').eq('church_id', churchId).order('transaction_date', { ascending: false }),
+            supabase.from('attendance_sessions').select('*').eq('church_id', churchId).order('session_date', { ascending: false }),
+            supabase.from('visitors').select('*').eq('church_id', churchId),
+            supabase.from('role_permissions').select('*').eq('church_id', churchId),
+            supabase.from('financial_categories').select('*').eq('church_id', churchId).order('name'),
+        ]);
+
+        if (profilesRes.data) setAllUsers(profilesRes.data.map(mapProfile));
+        if (roomsRes.data) setAllRooms(roomsRes.data as Room[]);
+        if (membersRes.data) setAllMembers(membersRes.data as Member[]);
+        if (transactionsRes.data) setAllTransactions(transactionsRes.data as FinancialTransaction[]);
+        if (attendanceRes.data) setAllAttendanceSessions(attendanceRes.data as AttendanceSession[]);
+        if (visitorsRes.data) setAllVisitors(visitorsRes.data as Visitor[]);
+        if (permissionsRes.data && permissionsRes.data.length > 0) {
+            setRolePermissions(permissionsRes.data as RolePermission[]);
+        }
+        if (categoriesRes.data) setAllCategories(categoriesRes.data as FinancialCategory[]);
+    };
+
+    // ── Derived state for current church ──────────────────────────
     const users = useMemo(() =>
         session ? allUsers.filter(u => u.church_id === session.church.id) : []
         , [session, allUsers]);
@@ -192,6 +321,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session ? allTransactions.filter(t => t.church_id === session.church.id) : []
         , [session, allTransactions]);
 
+    const categories = useMemo(() =>
+        session ? allCategories.filter(c => c.church_id === session.church.id) : []
+        , [session, allCategories]);
+
     const attendanceSessions = useMemo(() =>
         session ? allAttendanceSessions.filter(s => s.church_id === session.church.id) : []
         , [session, allAttendanceSessions]);
@@ -199,238 +332,551 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ─── Auth ─────────────────────────────────────────────────────
     const login = useCallback(async (email: string, password: string, slug?: string): Promise<boolean> => {
         setIsLoading(true);
-        await new Promise(r => setTimeout(r, 400));
+        try {
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-        // Read latest users/churches from LS so newly registered churches work
-        const latestUsers = lsGet<User[]>(LS_USERS, [...mockUsers]);
-        const latestChurches = lsGet<Church[]>(LS_CHURCHES, [...mockChurches]);
-
-        let user: User | undefined;
-        if (!slug || slug === 'superadmin') {
-            // Super Admin login — no slug needed
-            user = latestUsers.find(u => u.email === email && u.role === 'super_admin');
-        } else {
-            const church = latestChurches.find(c => c.slug === slug);
-            if (church) {
-                if (!church.is_active) {
-                    setIsLoading(false);
-                    toast.error('Esta igreja está inativa. Entre em contato com o suporte.');
-                    return false;
-                }
-                user = latestUsers.find(u => u.email === email && u.church_id === church.id);
-            }
-        }
-
-        if (user) {
-            // Validate password if user has one set
-            if (user.password && user.password !== password) {
-                setIsLoading(false);
-                toast.error('Senha incorreta');
+            if (error) {
+                toast.error(error.message === 'Invalid login credentials'
+                    ? 'Email ou senha incorretos'
+                    : error.message);
+                setIsLoading(false); // Immediate reset
                 return false;
             }
-            // For super_admin with no church_id, use a synthetic church object
-            const church = user.church_id
-                ? (latestChurches.find(c => c.id === user!.church_id) || latestChurches[0])
-                : { id: 'system', name: 'Sistema Central', slug: 'superadmin', cnpj: '', city: '', state: '', address: '', phone: '', pastor: '', admin_name: 'Super Admin', admin_email: user.email, plan: 'premium' as const, is_active: true, created_at: '', members_count: 0 };
-            const newSession = { user, church };
-            setSession(newSession);
-            setIsLoading(false);
-            return true;
-        }
-        setIsLoading(false);
-        return false;
-    }, []);
 
-    const changePassword = useCallback((currentPassword: string, newPassword: string): boolean => {
-        if (!session) return false;
-        const user = allUsers.find(u => u.id === session.user.id);
-        if (!user) return false;
-        // Validate current password
-        if (user.password && user.password !== currentPassword) {
+            if (!data.user) return false;
+
+            // Get the user's profile to check church association
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('*, churches:church_id(*)')
+                .eq('id', data.user.id)
+                .single();
+
+            if (!profile) {
+                toast.error('Perfil não encontrado no sistema.');
+                await supabase.auth.signOut();
+                setIsLoading(false);
+                return false;
+            }
+
+            // Check if user belongs to the correct church (by slug)
+            if (slug && slug !== 'superadmin' && profile.role !== 'super_admin') {
+                const { data: church } = await supabase
+                    .from('churches')
+                    .select('*')
+                    .eq('slug', slug)
+                    .single();
+
+                if (!church) {
+                    toast.error('Igreja não encontrada.');
+                    await supabase.auth.signOut();
+                    return false;
+                }
+
+                if (!church.is_active) {
+                    toast.error('Esta igreja está inativa. Entre em contato com o suporte.');
+                    await supabase.auth.signOut();
+                    return false;
+                }
+
+                if (profile.church_id !== church.id) {
+                    toast.error('Você não tem acesso a esta igreja.');
+                    await supabase.auth.signOut();
+                    return false;
+                }
+            }
+
+            // Session will be loaded via the onAuthStateChange listener
+            const success = await loadUserSession(data.user.id);
+            if (!success) {
+                await supabase.auth.signOut();
+                setIsLoading(false);
+                return false;
+            }
+            return true;
+        } catch (err: any) {
+            console.error('Login exception:', err);
+            const isNetworkError = err?.message?.includes('fetch') || err?.message?.includes('Network');
+            toast.error(isNetworkError
+                ? 'Sua conexão com o servidor falhou. Verifique sua rede.'
+                : 'Ocorreu um erro inesperado ao fazer login.');
+            setIsLoading(false);
+            return false;
+        } finally {
+            setIsLoading(false);
+        }
+    }, [supabase, loadUserSession]);
+
+    const changePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<boolean> => {
+        try {
+            const { error } = await supabase.auth.updateUser({ password: newPassword });
+            if (error) {
+                console.error('Password change error:', error);
+                return false;
+            }
+            return true;
+        } catch {
             return false;
         }
-        // Update password
-        setAllUsers(prev => prev.map(u => u.id === session.user.id ? { ...u, password: newPassword } : u));
-        return true;
-    }, [session, allUsers]);
+    }, [supabase]);
 
-    const logout = useCallback(() => {
+    const logout = useCallback(async () => {
+        await supabase.auth.signOut();
         setSession(null);
-    }, []);
+        clearAllData();
+    }, [supabase]);
 
     const hasRole = useCallback((...roles: UserRole[]) => {
         if (!session) return false;
         return roles.includes(session.user.role);
     }, [session]);
 
-    const registerChurch = useCallback((data: NewChurchData) => {
-        const newChurchId = `ch-${Date.now()}`;
-        const newChurch: Church = {
-            id: newChurchId,
-            name: data.churchName,
-            slug: data.slug,
-            cnpj: '',
-            city: '',
-            state: '',
-            address: '',
-            phone: '',
-            pastor: data.pastor,
-            admin_name: data.pastor,
-            admin_email: data.email,
-            plan: 'free',
-            is_active: true,
-            created_at: new Date().toISOString().split('T')[0],
-            members_count: 0,
-        };
-        const adminUser: User = {
-            id: `u-${Date.now()}`,
-            church_id: newChurchId,
-            name: data.pastor,
-            email: data.email,
-            role: 'admin',
-            is_active: true,
-            created_at: new Date().toISOString().split('T')[0],
-        };
+    const registerChurch = useCallback(async (data: NewChurchData) => {
+        try {
+            // Use the RPC for atomic and fast registration
+            const { data: newChurch, error: rpcError } = await supabase.rpc('register_new_church', {
+                p_email: data.email,
+                p_password: data.password,
+                p_church_name: data.churchName,
+                p_slug: data.slug,
+                p_pastor: data.pastor
+            });
 
-        setAllChurches(prev => [...prev, newChurch]);
-        setAllUsers(prev => [...prev, adminUser]);
-        setSession({ user: adminUser, church: newChurch });
-    }, []);
+            if (rpcError || !newChurch) {
+                console.error('Registration RPC error:', rpcError);
+                // Show the user-friendly error from the RPC
+                const msg = rpcError?.message || 'Erro ao registrar igreja no servidor.';
+                toast.error(msg);
+                return false;
+            }
 
-    const updateChurchStatus = useCallback((id: string, isActive: boolean) => {
-        setAllChurches(prev => prev.map(c => c.id === id ? { ...c, is_active: isActive } : c));
-    }, []);
+            // Auto sign-in in background to avoid blocking/crashing the main flow
+            setTimeout(async () => {
+                try {
+                    console.log('Attempting background auto sign-in for:', data.email);
+                    if (!supabase?.auth) return;
+
+                    const signInResult = await supabase.auth.signInWithPassword({
+                        email: data.email,
+                        password: data.password,
+                    });
+
+                    if (!signInResult.error) {
+                        const userResponse = await supabase.auth.getUser();
+                        if (userResponse?.data?.user) {
+                            await loadUserSession(userResponse.data.user.id);
+                            toast.success('Bem-vindo ao sistema!');
+                        }
+                    }
+                } catch (e) {
+                    console.error('Background auto-login failed safely:', e);
+                }
+            }, 1000);
+
+            return true;
+        } catch (err: any) {
+            console.error('Registration error details:', err);
+            toast.error(err?.message || 'Erro inesperado ao registrar. Tente novamente.');
+            return false;
+        }
+    }, [supabase, loadUserSession]);
+
+
+    const updateChurchStatus = useCallback(async (id: string, isActive: boolean) => {
+        const { error } = await supabase
+            .from('churches')
+            .update({ is_active: isActive })
+            .eq('id', id);
+
+        if (!error) {
+            setAllChurches(prev => prev.map(c => c.id === id ? { ...c, is_active: isActive } : c));
+        }
+    }, [supabase]);
+
+    const updateChurchData = useCallback(async (id: string, data: Partial<Church>): Promise<{ success: boolean; error?: string }> => {
+        try {
+            const { error } = await supabase
+                .from('churches')
+                .update(data)
+                .eq('id', id);
+
+            if (error) throw error;
+
+            setAllChurches(prev => prev.map(c => c.id === id ? { ...c, ...data } : c));
+
+            // Also update the current session if it's the active church
+            setSession(prev => {
+                if (prev && prev.church.id === id) {
+                    return { ...prev, church: { ...prev.church, ...data } };
+                }
+                return prev;
+            });
+
+            return { success: true };
+        } catch (err: any) {
+            console.error('Error updating church data:', err);
+            return { success: false, error: err.message || 'Erro desconhecido ao atualizar os dados da igreja.' };
+        }
+    }, [supabase]);
 
     // ─── Users CRUD ───────────────────────────────────────────────
-    const addUser = useCallback((data: NewUserData) => {
+    const addUser = useCallback(async (data: NewUserData) => {
         if (!session) return;
-        const newUser: User = {
-            id: `u-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            church_id: session.church.id,
-            name: data.name,
-            email: data.email,
-            role: data.role,
-            is_active: true,
-            created_at: new Date().toISOString().split('T')[0],
-        };
-        setAllUsers(prev => [...prev, newUser]);
-    }, [session]);
 
-    const updateUser = useCallback((id: string, data: Partial<User>) => {
-        setAllUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
-    }, []);
+        try {
+            // Create user using the RPC to bypass email confirmation and slowness
+            const { data: newProfile, error } = await supabase.rpc('admin_create_user', {
+                p_email: data.email,
+                p_password: data.password || 'temp123456',
+                p_name: data.name,
+                p_role: data.role,
+                p_church_id: session.church.id
+            });
 
-    const deleteUser = useCallback((id: string) => {
+            if (error || !newProfile) {
+                console.error('Admin create user error:', error);
+                toast.error('Erro ao criar usuário: ' + (error?.message || 'Erro desconhecido.'));
+                throw error;
+            }
+
+            // The RPC returns the new profile as jsonb
+            setAllUsers(prev => [...prev, mapProfile(newProfile as any)]);
+            toast.success('Usuário criado com sucesso!');
+        } catch (error) {
+            console.error('Add user error:', error);
+            throw error;
+        }
+    }, [session, supabase]);
+
+
+
+    const updateUser = useCallback(async (id: string, data: Partial<User>) => {
+        try {
+            const { data: updatedProfile, error } = await supabase.rpc('admin_update_user', {
+                p_user_id: id,
+                p_email: data.email,
+                p_name: data.name,
+                p_role: data.role,
+                p_is_active: data.is_active
+            });
+
+            if (error) {
+                console.error('Error updating user via RPC:', error);
+                toast.error('Erro ao atualizar usuário: ' + (error.message || 'Erro desconhecido.'));
+                throw error;
+            }
+
+            if (updatedProfile) {
+                setAllUsers(prev => prev.map(u => u.id === id ? mapProfile(updatedProfile as any) : u));
+            }
+        } catch (error: any) {
+            console.error('Update user catch error:', error);
+            throw error;
+        }
+    }, [supabase]);
+
+    const deleteUser = useCallback(async (id: string) => {
+        // Use RPC to delete both profile and auth user
+        const { error } = await supabase
+            .rpc('delete_user_complete', { target_user_id: id });
+
+        if (error) {
+            console.error('Error deleting user:', error);
+            // Try fallback delete if RPC fails (e.g. if function doesn't exist yet in user's instance)
+            const { error: fallbackError } = await supabase
+                .from('profiles')
+                .delete()
+                .eq('id', id);
+
+            if (fallbackError) {
+                toast.error('Erro ao excluir usuário: ' + (error.message || fallbackError.message));
+                throw fallbackError;
+            }
+        }
+
         setAllUsers(prev => prev.filter(u => u.id !== id));
-    }, []);
+    }, [supabase]);
+
+
 
     // ─── Rooms CRUD ───────────────────────────────────────────────
-    const addRoom = useCallback((data: NewRoomData) => {
-        if (!session) return;
-        const newRoom: Room = {
-            id: `r-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            church_id: session.church.id,
-            name: data.name,
-            age_group: data.age_group as Room['age_group'],
-            is_active: true,
-        };
-        setAllRooms(prev => [...prev, newRoom]);
-    }, [session]);
+    const addRoom = useCallback(async (data: NewRoomData): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Usuário não autenticado' };
 
-    const updateRoom = useCallback((id: string, data: Partial<Room>) => {
-        setAllRooms(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
-    }, []);
+        try {
+            const { data: newRoom, error } = await supabase
+                .from('rooms')
+                .insert({
+                    church_id: session.church.id,
+                    name: data.name,
+                    age_group: data.age_group,
+                    is_active: true,
+                })
+                .select()
+                .single();
 
-    const deleteRoom = useCallback((id: string) => {
-        setAllRooms(prev => prev.filter(r => r.id !== id));
-    }, []);
+            if (error) throw error;
+            if (newRoom) {
+                setAllRooms(prev => [...prev, newRoom as Room]);
+                return { success: true };
+            }
+            return { success: false, error: 'Erro desconhecido ao criar sala' };
+        } catch (err: any) {
+            console.error('[addRoom] Error:', err);
+            return { success: false, error: err.message || 'Erro ao criar sala' };
+        }
+    }, [session, supabase]);
+
+    const updateRoom = useCallback(async (id: string, data: Partial<Room>): Promise<{ success: boolean, error?: string }> => {
+        try {
+            const { error } = await supabase
+                .from('rooms')
+                .update(data)
+                .eq('id', id);
+
+            if (error) throw error;
+            setAllRooms(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
+            return { success: true };
+        } catch (err: any) {
+            console.error('[updateRoom] Error:', err);
+            return { success: false, error: err.message || 'Erro ao atualizar sala' };
+        }
+    }, [supabase]);
+
+    const deleteRoom = useCallback(async (id: string): Promise<{ success: boolean, error?: string }> => {
+        try {
+            const { error } = await supabase
+                .from('rooms')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+            setAllRooms(prev => prev.filter(r => r.id !== id));
+            return { success: true };
+        } catch (err: any) {
+            console.error('[deleteRoom] Error:', err);
+            return { success: false, error: err.message || 'Erro ao excluir sala' };
+        }
+    }, [supabase]);
+
     // ─── Members CRUD ─────────────────────────────────────────────
-    const addMember = useCallback((data: Omit<Member, 'id' | 'church_id' | 'created_at'>) => {
-        if (!session) return;
-        const newMember: Member = {
-            ...data,
-            id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            church_id: session.church.id,
-            created_at: new Date().toISOString(),
-        };
-        setAllMembers(prev => [...prev, newMember]);
-    }, [session]);
+    const addMember = useCallback(async (data: Omit<Member, 'id' | 'church_id' | 'created_at'>): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Usuário não autenticado' };
 
-    const updateMember = useCallback((id: string, data: Partial<Member>) => {
-        setAllMembers(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
-    }, []);
+        try {
+            const { data: newMember, error } = await supabase
+                .from('members')
+                .insert({
+                    ...data,
+                    church_id: session.church.id,
+                })
+                .select()
+                .single();
 
-    const removeMember = useCallback((id: string) => {
-        setAllMembers(prev => prev.filter(m => m.id !== id));
-    }, []);
+            if (error) throw error;
+            if (newMember) {
+                setAllMembers(prev => [...prev, newMember as Member]);
+                return { success: true };
+            }
+            return { success: false, error: 'Erro desconhecido ao cadastrar membro' };
+        } catch (err: any) {
+            console.error('[addMember] Error:', err);
+            return { success: false, error: err.message || 'Erro ao cadastrar membro' };
+        }
+    }, [session, supabase]);
+
+    const updateMember = useCallback(async (id: string, data: Partial<Member>) => {
+        const { error } = await supabase
+            .from('members')
+            .update(data)
+            .eq('id', id);
+
+        if (!error) {
+            setAllMembers(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
+        }
+    }, [supabase]);
+
+    const removeMember = useCallback(async (id: string) => {
+        const { error } = await supabase
+            .from('members')
+            .delete()
+            .eq('id', id);
+
+        if (!error) {
+            setAllMembers(prev => prev.filter(m => m.id !== id));
+        }
+    }, [supabase]);
 
     // ─── Financials CRUD ──────────────────────────────────────────
-    const addTransaction = useCallback((data: Omit<FinancialTransaction, 'id' | 'church_id' | 'created_at'>) => {
+    const addTransaction = useCallback(async (data: Omit<FinancialTransaction, 'id' | 'church_id' | 'created_at'>) => {
         if (!session) return;
-        const newTx: FinancialTransaction = {
-            ...data,
-            id: `ft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            church_id: session.church.id,
-            created_at: new Date().toISOString(),
-        };
-        setAllTransactions(prev => [...prev, newTx]);
-    }, [session]);
+        const { data: newTx, error } = await supabase
+            .from('financial_transactions')
+            .insert({
+                ...data,
+                church_id: session.church.id,
+            })
+            .select()
+            .single();
+
+        if (!error && newTx) {
+            setAllTransactions(prev => [...prev, newTx as FinancialTransaction]);
+            toast.success('Transação registrada com sucesso!');
+        }
+    }, [session, supabase]);
+
+    const addCategory = useCallback(async (data: NewCategoryData) => {
+        if (!session) return;
+        const { data: newCat, error } = await supabase
+            .from('financial_categories')
+            .insert({
+                church_id: session.church.id,
+                name: data.name,
+                type: data.type,
+            })
+            .select()
+            .single();
+
+        if (!error && newCat) {
+            setAllCategories(prev => [...prev, newCat as FinancialCategory]);
+            toast.success('Categoria adicionada!');
+        } else {
+            toast.error('Erro ao adicionar categoria.');
+        }
+    }, [session, supabase]);
+
+    const updateCategory = useCallback(async (id: string, name: string) => {
+        const { error } = await supabase
+            .from('financial_categories')
+            .update({ name })
+            .eq('id', id);
+
+        if (!error) {
+            setAllCategories(prev => prev.map(c => c.id === id ? { ...c, name } : c));
+            toast.success('Categoria atualizada!');
+        } else {
+            console.error('Error updating category:', error);
+            toast.error('Erro ao atualizar categoria: ' + error.message);
+        }
+    }, [supabase]);
+
+    const deleteCategory = useCallback(async (id: string) => {
+        const { error } = await supabase
+            .from('financial_categories')
+            .delete()
+            .eq('id', id);
+
+        if (!error) {
+            console.log('Category deleted successfully from DB:', id);
+            setAllCategories(prev => prev.filter(c => c.id !== id));
+            toast.success('Categoria excluída!');
+        } else {
+            console.error('Error deleting category:', error);
+            toast.error('Erro ao excluir categoria: ' + error.message);
+        }
+    }, [supabase]);
 
     // ─── Attendance CRUD ──────────────────────────────────────────
-    const addAttendanceSession = useCallback((data: Omit<AttendanceSession, 'id' | 'church_id' | 'created_at'>) => {
-        if (!session) return;
-        const newSession: AttendanceSession = {
-            ...data,
-            id: `as-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    const saveAttendanceSession = useCallback(async (data: NewAttendanceSessionData): Promise<AttendanceSession | null> => {
+        if (!session) throw new Error('Sessão não encontrada');
+
+        // CRITICAL: Remove the `id` field from the payload.
+        // When using onConflict with a UNIQUE constraint (church_id, room_id, session_date),
+        // Supabase needs to match on those columns. If we pass `id: undefined`,
+        // the DB generates a NEW random UUID which then conflicts with the UNIQUE constraint,
+        // causing the upsert to fail silently.
+        const { id: _removedId, ...dataWithoutId } = data;
+
+        const payload = {
+            ...dataWithoutId,
             church_id: session.church.id,
-            created_at: new Date().toISOString(),
         };
-        setAllAttendanceSessions(prev => [...prev, newSession]);
-    }, [session]);
+
+        console.log('[saveAttendanceSession] Upserting payload:', JSON.stringify(payload, null, 2));
+
+        const { data: newSession, error } = await supabase
+            .from('attendance_sessions')
+            .upsert(payload, { onConflict: 'church_id,room_id,session_date' })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('[saveAttendanceSession] Supabase error:', error);
+            throw new Error(error.message);
+        }
+
+        if (newSession) {
+            console.log('[saveAttendanceSession] Success! Session ID:', newSession.id);
+            setAllAttendanceSessions(prev => {
+                const filtered = prev.filter(s => s.id !== newSession.id);
+                return [...filtered, newSession as AttendanceSession];
+            });
+        }
+
+        return (newSession as AttendanceSession) ?? null;
+    }, [session, supabase]);
+
 
     // ─── Visitors ─────────────────────────────────────────────────
-    const addVisitor = useCallback((data: NewVisitorData) => {
+    const addVisitor = useCallback(async (data: NewVisitorData) => {
         if (!session) return;
-        const v: Visitor = {
-            id: `vis-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            church_id: session.church.id,
-            room_id: data.room_id,
-            room_name: data.room_name,
-            session_date: data.session_date,
-            name: data.name,
-            address: data.address,
-            phone: data.phone,
-            registered_at: new Date().toISOString(),
-        };
-        setAllVisitors(prev => [...prev, v]);
-    }, [session]);
+        const { data: newVisitor, error } = await supabase
+            .from('visitors')
+            .insert({
+                church_id: session.church.id,
+                room_id: data.room_id,
+                room_name: data.room_name,
+                session_date: data.session_date,
+                name: data.name,
+                address: data.address,
+                phone: data.phone,
+            })
+            .select()
+            .single();
+
+        if (!error && newVisitor) {
+            setAllVisitors(prev => [...prev, newVisitor as Visitor]);
+            toast.success('Visitante registrado com sucesso!');
+        }
+    }, [session, supabase]);
 
     // ─── Permissions CRUD ─────────────────────────────────────────
-    const updateRolePermission = useCallback((role: UserRole, modules: Record<string, boolean>) => {
+    const updateRolePermission = useCallback(async (role: UserRole, modules: Record<string, boolean>) => {
+        if (!session) return;
+
+        const safeModules = role === 'admin'
+            ? { ...modules, configuracoes: true }
+            : modules;
+
+        // Update in DB
+        await supabase
+            .from('role_permissions')
+            .update({ modules: safeModules })
+            .eq('church_id', session.church.id)
+            .eq('role', role);
+
         setRolePermissions(prev =>
             prev.map(rp => {
                 if (rp.role !== role) return rp;
-                // Admins always keep configuracoes access — prevent lockout
-                const safeModules = role === 'admin'
-                    ? { ...modules, configuracoes: true }
-                    : modules;
                 return { ...rp, modules: safeModules };
             })
         );
-    }, []);
+    }, [session, supabase]);
 
     return (
         <AuthContext.Provider value={{
             session, users, rooms, rolePermissions, visitors,
             login, logout, registerChurch, isLoading, hasRole, changePassword,
             churches: allChurches, updateChurchStatus,
+            updateChurchData,
             addUser, updateUser, deleteUser,
             addRoom, updateRoom, deleteRoom,
             updateRolePermission,
             addVisitor,
             members, addMember, updateMember, removeMember,
             transactions, addTransaction,
-            attendanceSessions, addAttendanceSession,
+            categories, addCategory, updateCategory, deleteCategory,
+            attendanceSessions, saveAttendanceSession,
         }}>
             {children}
         </AuthContext.Provider>

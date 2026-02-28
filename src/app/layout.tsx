@@ -22,7 +22,7 @@ export default function RootLayout({
           <TooltipProvider>
             {children}
           </TooltipProvider>
-          <Toaster richColors position="top-right" />
+          <Toaster richColors position="top-center" duration={3000} closeButton />
         </AuthProvider>
       </body>
     </html>
