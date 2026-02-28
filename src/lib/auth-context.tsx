@@ -207,11 +207,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 .single();
 
             if (profileError || !profile) {
-                console.error('loadUserSession: Profile fetch error:', profileError);
-                if (profileError?.message?.includes('Failed to fetch') || profileError?.message?.includes('timeout')) {
-                    toast.error('Erro de conexão com o servidor. Verifique sua internet.');
-                } else if (profileError) {
-                    toast.error('Erro ao carregar perfil: ' + profileError.message);
+                if (profileError) {
+                    console.error('loadUserSession: Profile fetch error:', profileError);
+                    if (profileError.message?.includes('Failed to fetch') || profileError.message?.includes('timeout')) {
+                        toast.error('Erro de conexão com o servidor. Verifique sua internet.');
+                    } else {
+                        toast.error('Erro ao carregar perfil: ' + profileError.message);
+                    }
+                } else {
+                    console.warn('loadUserSession: Profile not found for user:', userId);
+                    // If profile is missing (e.g. deleted), we should sign out
+                    await supabase.auth.signOut();
+                    setSession(null);
+                    clearAllData();
                 }
                 return false;
             }
