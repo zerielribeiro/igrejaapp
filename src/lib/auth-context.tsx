@@ -149,9 +149,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // ── Load session on mount ─────────────────────────────────────
     useEffect(() => {
-        // We use onAuthStateChange as the primary source of truth.
-        // SIGNED_IN fires on initial load if a session exists.
+        let isMounted = true;
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, authSession) => {
+            if (!isMounted) return;
             console.log(`Auth event: ${event}`, authSession?.user?.email);
 
             if (event === 'INITIAL_SESSION') {
@@ -162,10 +163,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     setIsLoading(false);
                 }
             } else if (event === 'SIGNED_IN' && authSession?.user) {
-                // SIGNED_IN fires on tab focus in some Supabase versions.
-                // If session is already loaded for the same user, skip full reload.
-                if (sessionLoadedRef.current || initialLoadDone.current) {
-                    console.log('Auth event: SIGNED_IN ignored (session already loaded)');
+                // Only skip if session data is ALREADY loaded.
+                // Do NOT check initialLoadDone — INITIAL_SESSION may fire empty in SSR,
+                // then SIGNED_IN fires with the real user and MUST be processed.
+                if (sessionLoadedRef.current) {
+                    console.log('Auth event: SIGNED_IN skipped (session already active)');
                     return;
                 }
                 await loadUserSession(authSession.user.id);
@@ -185,31 +187,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         });
 
-        // Fallback: If after 4s we still haven't completed loading,
-        // manually check getSession to unblock the UI.
-        // Uses refs instead of state to avoid stale closure issues.
+        // Safety net: if nothing resolved after 5s, force-check and unblock
         const timeoutId = setTimeout(async () => {
-            if (!sessionLoadedRef.current && !initialLoadDone.current) {
-                console.log('Session initialization timeout — checking session...');
-                try {
-                    const { data: { session: currentSession } } = await supabase.auth.getSession();
-                    if (currentSession?.user && !sessionLoadedRef.current) {
-                        await loadUserSession(currentSession.user.id);
-                    } else if (!currentSession) {
-                        initialLoadDone.current = true;
-                        setIsLoading(false);
-                    }
-                } catch (e) {
-                    console.error('Timeout session check failed:', e);
+            if (!isMounted || sessionLoadedRef.current || initialLoadDone.current) return;
+            console.log('Session timeout (5s) — forcing session check...');
+            try {
+                const { data: { session: s } } = await supabase.auth.getSession();
+                if (!isMounted || sessionLoadedRef.current) return;
+                if (s?.user) {
+                    await loadUserSession(s.user.id, true);
+                } else {
                     initialLoadDone.current = true;
                     setIsLoading(false);
                 }
+            } catch {
+                if (isMounted) { initialLoadDone.current = true; setIsLoading(false); }
             }
-        }, 4000);
+        }, 5000);
 
         return () => {
+            isMounted = false;
             subscription.unsubscribe();
             clearTimeout(timeoutId);
+            loadingIds.current.clear();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -226,13 +226,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRolePermissions(defaultRolePermissions);
     };
 
-    const loadUserSession = async (userId: string): Promise<boolean> => {
+    const loadUserSession = async (userId: string, isFallback = false): Promise<boolean> => {
         if (loadingIds.current.has(userId)) {
-            console.log('loadUserSession: Already loading for user:', userId);
+            console.log(`loadUserSession: Already loading for user: ${userId} ${isFallback ? '(fallback call ignored)' : ''}`);
             return true;
         }
         loadingIds.current.add(userId);
         setIsLoading(true);
+        const startTime = Date.now();
 
         try {
             console.log('loadUserSession: Fetching profile for user:', userId);
@@ -299,8 +300,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Mark session as loaded so TOKEN_REFRESHED / SIGNED_IN won't trigger a full reload
             sessionLoadedRef.current = true;
 
-            // 3. Load church data
-            await loadChurchData(user.church_id, user.role);
+            // 3. Load church data (with timeout to prevent freezing)
+            try {
+                const dataPromise = loadChurchData(user.church_id, user.role);
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Data timeout')), 8000));
+                await Promise.race([dataPromise, timeoutPromise]);
+            } catch (err) {
+                console.warn('loadUserSession: Secondary data loading timed out or failed, but session is active.');
+            }
+
+            console.log(`loadUserSession: Completed in ${Date.now() - startTime}ms`);
             return true;
         } catch (err: any) {
             console.error('Exception in loadUserSession:', err);

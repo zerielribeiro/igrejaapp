@@ -25,11 +25,12 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
     const slug = params?.slug as string;
     const [authorized, setAuthorized] = useState(false);
 
+    // Immediate check for public pages to avoid spinner delay
+    const isPublicPage = pathname.endsWith('/login') || pathname.endsWith('/register') || pathname === '/' || pathname === `/${slug}/login` || pathname === `/${slug}/register`;
+
     useEffect(() => {
         if (isLoading) return;
 
-        // Skip guarding for login and register pages
-        const isPublicPage = pathname.endsWith('/login') || pathname.endsWith('/register') || pathname === '/';
         if (isPublicPage) {
             setAuthorized(true);
             return;
@@ -75,7 +76,8 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
     }, [session, isLoading, slug, router, pathname, rolePermissions]);
 
     // Show nothing (or a loading spinner) while checking/redirecting
-    if (isLoading || !authorized) {
+    // But ONLY if it's not a public page
+    if (!isPublicPage && (isLoading || !authorized)) {
         return (
             <div className="flex h-screen w-full items-center justify-center bg-background">
                 <div className="flex flex-col items-center gap-2">
