@@ -163,11 +163,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     setIsLoading(false);
                 }
             } else if (event === 'SIGNED_IN' && authSession?.user) {
-                // Only skip if session data is ALREADY loaded.
-                // Do NOT check initialLoadDone — INITIAL_SESSION may fire empty in SSR,
-                // then SIGNED_IN fires with the real user and MUST be processed.
-                if (sessionLoadedRef.current) {
-                    console.log('Auth event: SIGNED_IN skipped (session already active)');
+                // Skip if already loading or already loaded
+                if (sessionLoadedRef.current || loadingIds.current.has(authSession.user.id)) {
+                    console.log(`Auth event: SIGNED_IN ignored (already ${sessionLoadedRef.current ? 'loaded' : 'loading'})`);
                     return;
                 }
                 await loadUserSession(authSession.user.id);
@@ -189,7 +187,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Safety net: if nothing resolved after 6s, force-check and unblock
         const timeoutId = setTimeout(async () => {
-            if (!isMounted || sessionLoadedRef.current || initialLoadDone.current) return;
+            // If already loaded or ALREADY loading something else, don't force a check
+            if (!isMounted || sessionLoadedRef.current || initialLoadDone.current || loadingIds.current.size > 0) {
+                return;
+            }
+
             console.log('Session timeout (6s) — forcing session check...');
             try {
                 const { data: { session: s } } = await supabase.auth.getSession();
@@ -203,7 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             } catch {
                 if (isMounted) { initialLoadDone.current = true; setIsLoading(false); }
             }
-        }, 5000);
+        }, 6000);
 
         return () => {
             isMounted = false;
