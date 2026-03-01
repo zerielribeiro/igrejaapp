@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { formatCPF, formatPhone, normalizeName, calculateAgeGroup } from '@/lib/validators';
 
 export default function EditarMembroPage() {
     const params = useParams();
@@ -70,17 +71,20 @@ export default function EditarMembroPage() {
             return;
         }
 
+        const ageGroup = calculateAgeGroup(birth);
+
         updateMember(memberId, {
-            full_name: name,
-            cpf,
+            full_name: normalizeName(name),
+            cpf: cpf ? cpf.replace(/\D/g, '') : '',
             birth_date: birth,
-            phone,
-            email,
-            address,
+            phone: phone.replace(/\D/g, ''),
+            email: email.trim().toLowerCase(),
+            address: address.trim(),
             baptism_date: baptism || undefined,
             join_date: join,
             room_id: roomId,
             status,
+            age_group: ageGroup,
         });
 
         toast.success('Membro atualizado com sucesso!');
@@ -107,7 +111,7 @@ export default function EditarMembroPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="cpf">CPF</Label>
-                                <Input id="cpf" placeholder="000.000.000-00" value={cpf} onChange={e => setCpf(e.target.value)} />
+                                <Input id="cpf" placeholder="000.000.000-00" value={cpf} onChange={e => setCpf(formatCPF(e.target.value))} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="birth">Data de Nascimento *</Label>
@@ -115,7 +119,7 @@ export default function EditarMembroPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="phone">Telefone</Label>
-                                <Input id="phone" placeholder="(00) 00000-0000" value={phone} onChange={e => setPhone(e.target.value)} />
+                                <Input id="phone" placeholder="(00) 00000-0000" value={phone} onChange={e => setPhone(formatPhone(e.target.value))} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="email">E-mail</Label>

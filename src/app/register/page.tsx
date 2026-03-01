@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 
+import { normalizeName } from '@/lib/validators';
+
 export default function RegisterPage() {
     const router = useRouter();
     const { registerChurch } = useAuth();
@@ -41,10 +43,10 @@ export default function RegisterPage() {
         setIsLoading(true);
         try {
             const success = await registerChurch({
-                churchName: formData.churchName,
-                slug: formData.slug,
-                pastor: formData.pastor,
-                email: formData.email,
+                churchName: normalizeName(formData.churchName),
+                slug: formData.slug.trim().toLowerCase(),
+                pastor: normalizeName(formData.pastor),
+                email: formData.email.trim().toLowerCase(),
                 password: formData.password,
             });
             if (success) {

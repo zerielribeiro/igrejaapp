@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Users, ClipboardCheck, DollarSign, TrendingUp, AlertTriangle, Cake, ArrowUpRight, ArrowDownRight, UserCheck, MapPin, Phone, Clock as ClockIcon, ChevronRight } from 'lucide-react';
+import { Users, ClipboardCheck, DollarSign, TrendingUp, AlertTriangle, Cake, ArrowUpRight, ArrowDownRight, UserCheck, MapPin, Phone, Clock as ClockIcon, ChevronRight, Wallet } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useAuth } from '@/lib/auth-context';
+import { formatCurrency } from '@/lib/validators';
 
 const COLORS = ['#1A2C5B', '#C9A84C', '#3B82F6', '#8B5CF6', '#EC4899'];
 
@@ -31,10 +32,10 @@ export default function DashboardPage() {
     const totalMembers = members.length;
 
     // Compute financial summary from transactions
-    const financialSummary = useMemo(() => {
-        const totalIncome = transactions.filter(t => t.type === 'entrada').reduce((sum, t) => sum + Number(t.amount), 0);
-        const totalExpense = transactions.filter(t => t.type === 'saida').reduce((sum, t) => sum + Number(t.amount), 0);
-        return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
+    const summary = useMemo(() => {
+        const total_income = transactions.filter(t => t.type === 'entrada').reduce((sum, t) => sum + Number(t.amount), 0);
+        const total_expense = transactions.filter(t => t.type === 'saida').reduce((sum, t) => sum + Number(t.amount), 0);
+        return { total_income, total_expense, balance: total_income - total_expense };
     }, [transactions]);
 
     // Compute attendance data from sessions
@@ -93,8 +94,27 @@ export default function DashboardPage() {
     const stats = [
         { title: 'Total de Membros', value: totalMembers, subtitle: `${activeMembers} ativos`, icon: Users, trend: '', up: true, color: 'text-blue-500' },
         { title: 'Presença Último Culto', value: `${lastPercentage}%`, subtitle: `${lastPresent} de ${lastTotal}`, icon: ClipboardCheck, trend: '', up: true, color: 'text-emerald-500' },
-        { title: 'Receita do Mês', value: `R$ ${financialSummary.totalIncome.toLocaleString('pt-BR')}`, subtitle: 'Dízimos e ofertas', icon: DollarSign, trend: '', up: true, color: 'text-amber-500' },
-        { title: 'Saldo Atual', value: `R$ ${financialSummary.balance.toLocaleString('pt-BR')}`, subtitle: 'Receitas - Despesas', icon: TrendingUp, trend: '', up: financialSummary.balance >= 0, color: financialSummary.balance >= 0 ? 'text-emerald-500' : 'text-red-500' },
+        {
+            title: 'Entradas (Mês)',
+            value: `R$ ${formatCurrency(summary.total_income)}`,
+            subtitle: 'Receitas totais do mês',
+            icon: ArrowUpRight,
+            color: 'text-emerald-500',
+        },
+        {
+            title: 'Saídas (Mês)',
+            value: `R$ ${formatCurrency(summary.total_expense)}`,
+            subtitle: 'Despesas totais do mês',
+            icon: ArrowDownRight,
+            color: 'text-red-500',
+        },
+        {
+            title: 'Saldo Atual',
+            value: `R$ ${formatCurrency(summary.balance)}`,
+            subtitle: 'Recurso disponível em caixa',
+            icon: Wallet,
+            color: summary.balance >= 0 ? 'text-blue-500' : 'text-red-600',
+        },
     ];
 
     return (

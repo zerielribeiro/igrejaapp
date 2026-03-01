@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import { formatCPF, isValidCPF, formatPhone, calculateAgeGroup, isReasonableDate } from '@/lib/validators';
+import { formatCPF, isValidCPF, formatPhone, calculateAgeGroup, isReasonableDate, normalizeName } from '@/lib/validators';
 
 export default function NovoMembroPage() {
     const params = useParams();
@@ -79,11 +79,11 @@ export default function NovoMembroPage() {
         setIsSubmitting(true);
 
         const payload = {
-            full_name: name.trim(),
+            full_name: normalizeName(name),
             cpf: cpf ? cpf.replace(/\D/g, '') : '',
             birth_date: birth,
             phone: phone.replace(/\D/g, ''),
-            email: email.trim(),
+            email: email.trim().toLowerCase(),
             address: address.trim(),
             baptism_date: baptism || undefined,
             join_date: join,

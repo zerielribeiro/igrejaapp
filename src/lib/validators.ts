@@ -98,8 +98,52 @@ export function isReasonableDate(dateStr: string): boolean {
     return date >= minDate && date <= new Date();
 }
 
-// ─── Amount ─────────────────────────────────────────────────
+// ─── Amount & Currency ──────────────────────────────────────
 export function isValidAmount(value: string | number): boolean {
-    const num = typeof value === 'string' ? parseFloat(value) : value;
+    const num = typeof value === 'string' ? parseFloat(value.replace(/\./g, '').replace(',', '.')) : value;
     return !isNaN(num) && num > 0 && isFinite(num);
+}
+
+export function formatCurrency(value: number): string {
+    return value.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+/**
+ * Masks a string input into a currency format: 0,00 -> 0,01 -> 1,25 -> 1.250,50
+ */
+export function maskCurrency(value: string): string {
+    const digits = value.replace(/\D/g, '');
+    const number = (parseInt(digits) || 0) / 100;
+    return number.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+export function parseCurrency(value: string): number {
+    return parseFloat(value.replace(/\./g, '').replace(',', '.')) || 0;
+}
+
+// ─── Name Normalization ─────────────────────────────────────
+/**
+ * Normalizes a name to Title Case, keeping Portuguese prepositions in lowercase.
+ * Example: "JOÃO DA SILVA" -> "João da Silva"
+ */
+export function normalizeName(name: string): string {
+    if (!name) return '';
+    const prepositions = ['de', 'da', 'do', 'dos', 'das', 'e'];
+    return name
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .map((word, index) => {
+            if (index > 0 && prepositions.includes(word)) {
+                return word;
+            }
+            return word.charAt(0).toUpperCase() + word.slice(1);
+        })
+        .join(' ');
 }

@@ -2,7 +2,7 @@
 
 export type UserRole = 'super_admin' | 'admin' | 'pastor' | 'secretary' | 'treasurer';
 export type MemberStatus = 'ativo' | 'inativo' | 'visitante' | 'transferido';
-export type AgeGroup = 'Criança' | 'Jovem' | 'Adulto';
+export type AgeGroup = 'Bebê' | 'Criança' | 'Adolescente' | 'Jovem' | 'Adulto' | 'Idoso';
 export type AttendanceStatus = 'presente' | 'ausente';
 export type TransactionType = 'entrada' | 'saida';
 export type PlanType = 'free' | 'basic' | 'premium' | 'enterprise';

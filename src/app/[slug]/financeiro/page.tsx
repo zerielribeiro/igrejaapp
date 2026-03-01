@@ -15,6 +15,7 @@ import { useAuth } from '@/lib/auth-context';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { toast } from 'sonner';
+import { maskCurrency, parseCurrency, normalizeName, formatCurrency } from '@/lib/validators';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -82,21 +83,17 @@ export default function FinanceiroPage() {
             return;
         }
 
-        const parsedAmount = parseFloat(amount);
-        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        const parsedAmount = parseCurrency(amount);
+        if (parsedAmount <= 0) {
             toast.error('O valor deve ser maior que zero.');
             return;
         }
 
-        // Find the category name from id if it was selected from list
-        // Actually, our category state holds the name currently in UI but we should use IDs or names.
-        // Looking at database schema, category is a text field. So we use names.
-
         addTransaction({
             type,
-            category,
-            description,
-            amount: parseFloat(amount),
+            category: normalizeName(category),
+            description: normalizeName(description),
+            amount: parsedAmount,
             transaction_date: date,
         });
         toast.success('Transação registrada!');
@@ -267,7 +264,7 @@ export default function FinanceiroPage() {
                             <form onSubmit={handleSaveTransaction} className="space-y-4">
                                 <div className="space-y-2">
                                     <Label>Tipo</Label>
-                                    <Select value={type} onValueChange={(v: any) => {
+                                    <Select value={type} onValueChange={(v: 'entrada' | 'saida') => {
                                         setType(v);
                                         setCategory(''); // Reset category when type changes
                                     }}>
@@ -295,7 +292,11 @@ export default function FinanceiroPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Valor (R$)</Label>
-                                    <Input type="number" placeholder="0,00" step="0.01" min="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
+                                    <Input
+                                        placeholder="0,00"
+                                        value={amount}
+                                        onChange={e => setAmount(maskCurrency(e.target.value))}
+                                    />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Data</Label>
@@ -316,7 +317,7 @@ export default function FinanceiroPage() {
                             <div>
                                 <p className="text-sm text-muted-foreground">Receitas</p>
                                 <p className="text-2xl font-bold text-emerald-600">
-                                    R$ {totalIncome.toLocaleString('pt-BR')}
+                                    R$ {formatCurrency(totalIncome)}
                                 </p>
                             </div>
                             <div className="p-2.5 rounded-xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20">
@@ -331,7 +332,7 @@ export default function FinanceiroPage() {
                             <div>
                                 <p className="text-sm text-muted-foreground">Despesas</p>
                                 <p className="text-2xl font-bold text-red-500">
-                                    R$ {totalExpense.toLocaleString('pt-BR')}
+                                    R$ {formatCurrency(totalExpense)}
                                 </p>
                             </div>
                             <div className="p-2.5 rounded-xl bg-red-100 text-red-500 dark:bg-red-900/20">
@@ -430,7 +431,7 @@ export default function FinanceiroPage() {
                                             <TableCell className="text-right font-medium text-emerald-600">
                                                 <span className="flex items-center justify-end gap-1">
                                                     <ArrowUpRight className="h-3 w-3" />
-                                                    R$ {t.amount.toLocaleString('pt-BR')}
+                                                    R$ {formatCurrency(t.amount)}
                                                 </span>
                                             </TableCell>
                                         </TableRow>
