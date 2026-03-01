@@ -237,14 +237,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(true);
         const startTime = Date.now();
 
+        // Internal helper for queries with timeout
+        const fetchWithTimeout = async <T,>(promise: any, timeoutMs = 5000): Promise<T> => {
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Query timeout')), timeoutMs)
+            );
+            return Promise.race([promise, timeoutPromise]);
+        };
+
         try {
             console.log('loadUserSession: Fetching profile for user:', userId);
-            // 1. Get profile
-            const { data: profile, error: profileError } = await supabase
+            // 1. Get profile with internal timeout
+            const profilePromise = supabase
                 .from('profiles')
                 .select('*')
                 .eq('id', userId)
                 .single();
+
+            const { data: profile, error: profileError } = await fetchWithTimeout<any>(profilePromise)
+                .catch(err => {
+                    console.error('loadUserSession: Profile fetch timed out or failed:', err);
+                    return { data: null, error: err };
+                });
 
             if (profileError || !profile) {
                 if (profileError) {
@@ -279,11 +293,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (chError) console.error('Error loading churches for super admin:', chError);
                 if (churches) setAllChurches(churches.map(mapChurch));
             } else {
-                const { data: churchData, error: churchError } = await supabase
+                // Fetch church with internal timeout
+                const churchPromise = supabase
                     .from('churches')
                     .select('*')
                     .eq('id', user.church_id)
                     .single();
+
+                const { data: churchData, error: churchError } = await fetchWithTimeout<any>(churchPromise)
+                    .catch(err => {
+                        console.error('loadUserSession: Church fetch timed out or failed:', err);
+                        return { data: null, error: err };
+                    });
 
                 if (churchError || !churchData) {
                     console.error('Church not found:', churchError);
