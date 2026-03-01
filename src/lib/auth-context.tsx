@@ -187,10 +187,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         });
 
-        // Safety net: if nothing resolved after 5s, force-check and unblock
+        // Safety net: if nothing resolved after 6s, force-check and unblock
         const timeoutId = setTimeout(async () => {
             if (!isMounted || sessionLoadedRef.current || initialLoadDone.current) return;
-            console.log('Session timeout (5s) — forcing session check...');
+            console.log('Session timeout (6s) — forcing session check...');
             try {
                 const { data: { session: s } } = await supabase.auth.getSession();
                 if (!isMounted || sessionLoadedRef.current) return;
@@ -300,16 +300,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Mark session as loaded so TOKEN_REFRESHED / SIGNED_IN won't trigger a full reload
             sessionLoadedRef.current = true;
 
-            // 3. Load church data (with timeout to prevent freezing)
-            try {
-                const dataPromise = loadChurchData(user.church_id, user.role);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Data timeout')), 8000));
-                await Promise.race([dataPromise, timeoutPromise]);
-            } catch (err) {
-                console.warn('loadUserSession: Secondary data loading timed out or failed, but session is active.');
-            }
+            // 3. Load church data in BACKGROUND (don't await) 
+            // This prevents the UI from freezing if one of the 8 queries is slow.
+            loadChurchData(user.church_id, user.role).catch(err => {
+                console.warn('loadUserSession: Background data loading failed:', err);
+            });
 
-            console.log(`loadUserSession: Completed in ${Date.now() - startTime}ms`);
+            console.log(`loadUserSession: Basic session ready in ${Date.now() - startTime}ms`);
             return true;
         } catch (err: any) {
             console.error('Exception in loadUserSession:', err);
@@ -355,6 +352,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setRolePermissions(permissionsRes.data as RolePermission[]);
         }
         if (categoriesRes.data) setAllCategories(categoriesRes.data as FinancialCategory[]);
+        console.log('loadChurchData: Background all-data fetch completed.');
     };
 
     // ── Derived state for current church ──────────────────────────
