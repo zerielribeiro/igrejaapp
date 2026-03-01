@@ -158,12 +158,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (authSession?.user) {
                     await loadUserSession(authSession.user.id);
                 } else {
+                    initialLoadDone.current = true;
                     setIsLoading(false);
                 }
             } else if (event === 'SIGNED_IN' && authSession?.user) {
                 // SIGNED_IN fires on tab focus in some Supabase versions.
                 // If session is already loaded for the same user, skip full reload.
-                if (sessionLoadedRef.current) {
+                if (sessionLoadedRef.current || initialLoadDone.current) {
                     console.log('Auth event: SIGNED_IN ignored (session already loaded)');
                     return;
                 }
@@ -174,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 console.log('Auth event: TOKEN_REFRESHED ignored (silent refresh)');
             } else if (event === 'SIGNED_OUT') {
                 sessionLoadedRef.current = false;
+                initialLoadDone.current = false;
                 setSession(null);
                 clearAllData();
                 setIsLoading(false);
@@ -183,19 +185,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         });
 
-        // Fallback: If after 3s we still haven't received an INITIAL_SESSION or SIGNED_IN event,
+        // Fallback: If after 4s we still haven't completed loading,
         // manually check getSession to unblock the UI.
+        // Uses refs instead of state to avoid stale closure issues.
         const timeoutId = setTimeout(async () => {
-            if (isLoading && !session) {
-                console.log('Session initialization timeout check...');
-                const { data: { session: currentSession } } = await supabase.auth.getSession();
-                if (currentSession?.user && !session) {
-                    await loadUserSession(currentSession.user.id);
-                } else if (!currentSession) {
+            if (!sessionLoadedRef.current && !initialLoadDone.current) {
+                console.log('Session initialization timeout — checking session...');
+                try {
+                    const { data: { session: currentSession } } = await supabase.auth.getSession();
+                    if (currentSession?.user && !sessionLoadedRef.current) {
+                        await loadUserSession(currentSession.user.id);
+                    } else if (!currentSession) {
+                        initialLoadDone.current = true;
+                        setIsLoading(false);
+                    }
+                } catch (e) {
+                    console.error('Timeout session check failed:', e);
+                    initialLoadDone.current = true;
                     setIsLoading(false);
                 }
             }
-        }, 3000);
+        }, 4000);
 
         return () => {
             subscription.unsubscribe();
@@ -301,6 +311,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return false;
         } finally {
             loadingIds.current.delete(userId);
+            initialLoadDone.current = true;
             setIsLoading(false);
         }
     };
