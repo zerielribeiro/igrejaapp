@@ -102,7 +102,7 @@ export default function TenantLayout({ children }: { children: React.ReactNode }
                             />
                         </div>
                     </header>
-                    <main className="flex-1 p-4 md:p-6 lg:p-8">
+                    <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-screen-2xl mx-auto w-full">
                         {children}
                     </main>
                 </SidebarInset>

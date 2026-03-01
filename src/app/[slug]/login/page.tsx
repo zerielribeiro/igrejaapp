@@ -10,15 +10,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { useSearchParams } from 'next/navigation';
 
 export default function LoginPage() {
     const params = useParams();
     const slug = params.slug as string;
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { login, isLoading } = useAuth();
     const [showPassword, setShowPassword] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+
+    const redirectTo = searchParams ? searchParams.get('redirectTo') : null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -26,14 +30,16 @@ export default function LoginPage() {
             const success = await login(email, password, slug);
             if (success) {
                 toast.success('Login realizado com sucesso!');
-                // Wait a micro-task to ensure state is flushed if needed
+                // Wait a micro-task to ensure state is flushed and middleware can see the cookie
                 setTimeout(() => {
-                    if (slug === 'superadmin') {
+                    if (redirectTo) {
+                        router.replace(redirectTo);
+                    } else if (slug === 'superadmin') {
                         router.replace('/superadmin');
                     } else {
                         router.replace(`/${slug}/dashboard`);
                     }
-                }, 100);
+                }, 200);
             }
         } catch (err) {
             console.error('Redirect error:', err);
@@ -63,12 +69,12 @@ export default function LoginPage() {
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div className="space-y-2">
                                 <Label htmlFor="email">E-mail</Label>
-                                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="seu@email.com" required />
+                                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="seu@email.com" required disabled={isLoading} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="password">Senha</Label>
                                 <div className="relative">
-                                    <Input id="password" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+                                    <Input id="password" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required disabled={isLoading} />
                                     <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                     </button>
@@ -78,11 +84,6 @@ export default function LoginPage() {
                                 {isLoading ? 'Entrando...' : 'Entrar'}
                             </Button>
                         </form>
-                        <div className="mt-4 text-center">
-                            <p className="text-xs text-muted-foreground">
-                                Demo: carlos@igrejabatista.com / qualquer senha
-                            </p>
-                        </div>
                     </CardContent>
                 </Card>
 

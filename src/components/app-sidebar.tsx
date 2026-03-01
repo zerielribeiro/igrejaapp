@@ -7,7 +7,7 @@ import {
 import {
     Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
     SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
-    SidebarHeader, SidebarRail,
+    SidebarHeader, SidebarRail, useSidebar
 } from '@/components/ui/sidebar';
 import { useAuth } from '@/lib/auth-context';
 
@@ -24,6 +24,7 @@ const menuItems = [
 export function AppSidebar({ slug }: { slug: string }) {
     const pathname = usePathname();
     const { session, rolePermissions } = useAuth();
+    const { isMobile, setOpenMobile } = useSidebar();
 
     // Find the permission set for the current user's role
     const userRole = session?.user.role;
@@ -76,7 +77,14 @@ export function AppSidebar({ slug }: { slug: string }) {
                                             tooltip={item.title}
                                             className="transition-all duration-200"
                                         >
-                                            <Link href={fullPath}>
+                                            <Link
+                                                href={fullPath}
+                                                onClick={() => {
+                                                    if (isMobile) {
+                                                        setOpenMobile(false);
+                                                    }
+                                                }}
+                                            >
                                                 <item.icon className="h-4 w-4" />
                                                 <span>{item.title}</span>
                                             </Link>

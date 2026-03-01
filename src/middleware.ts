@@ -22,21 +22,21 @@ export async function middleware(request: NextRequest) {
         return updateSession(request);
     }
 
-    // 3. Extract slug from /[slug]/...
+    // 4. Extract slug from /[slug]/...
     const segments = pathname.split('/');
     const slug = segments[1];
 
     if (!slug) {
-        return updateSession(request);
+        return await updateSession(request);
     }
 
-    // 4. Login pages don't need auth check
+    // 5. Login pages don't need auth check
     if (pathname.endsWith('/login')) {
-        return updateSession(request);
+        return await updateSession(request);
     }
 
-    // 5. SECURITY FIX: Verify authentication for all protected routes
-    return verifyAuthAndUpdateSession(request, slug);
+    // 6. Verify authentication for all protected routes
+    return await verifyAuthAndUpdateSession(request, slug);
 }
 
 async function verifyAuthAndUpdateSession(request: NextRequest, slug: string) {
@@ -67,13 +67,19 @@ async function verifyAuthAndUpdateSession(request: NextRequest, slug: string) {
         }
     );
 
-    // Verify user is authenticated
-    const { data: { user }, error } = await supabase.auth.getUser();
+    // IMPORTANT: Use getUser() instead of getSession() for security in middleware
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (error || !user) {
-        // Not authenticated — redirect to login
+    if (!user) {
+        // Double check: if we are already on a login page, don't redirect again
+        if (request.nextUrl.pathname.endsWith('/login')) {
+            return supabaseResponse;
+        }
+
         const loginUrl = request.nextUrl.clone();
         loginUrl.pathname = `/${slug}/login`;
+        // Preserve the original destination for possible redirect back
+        loginUrl.searchParams.set('redirectTo', request.nextUrl.pathname);
         return NextResponse.redirect(loginUrl);
     }
 
@@ -108,7 +114,7 @@ async function updateSession(request: NextRequest) {
         }
     );
 
-    // Refresh the session
+    // Refresh session if it exists
     await supabase.auth.getUser();
 
     return supabaseResponse;

@@ -140,43 +140,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [allCategories, setAllCategories] = useState<FinancialCategory[]>([]);
     const [allAttendanceSessions, setAllAttendanceSessions] = useState<AttendanceSession[]>([]);
     const [rolePermissions, setRolePermissions] = useState<RolePermission[]>(defaultRolePermissions);
+
+    // Track which user ID is currently being loaded to prevent race conditions
     const loadingIds = useRef<Set<string>>(new Set());
+    const initialLoadDone = useRef(false);
+    // Track if session data is already loaded to avoid re-loading on TOKEN_REFRESHED
+    const sessionLoadedRef = useRef(false);
 
     // ── Load session on mount ─────────────────────────────────────
     useEffect(() => {
-        const initSession = async () => {
-            // Safety timeout: If session restoration takes more than 5 seconds, 
-            // release the loading state so the user can at least try to log in manually.
-            const timeoutId = setTimeout(() => {
-                setIsLoading(false);
-                console.log('Session initialization timed out, releasing loading state.');
-            }, 5000);
+        // We use onAuthStateChange as the primary source of truth.
+        // SIGNED_IN fires on initial load if a session exists.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, authSession) => {
+            console.log(`Auth event: ${event}`, authSession?.user?.email);
 
-            try {
-                const { data: { session: authSession } } = await supabase.auth.getSession();
+            if (event === 'INITIAL_SESSION') {
                 if (authSession?.user) {
                     await loadUserSession(authSession.user.id);
+                } else {
+                    setIsLoading(false);
                 }
-            } catch (err) {
-                console.error('Error loading session:', err);
-            } finally {
-                clearTimeout(timeoutId);
-                setIsLoading(false);
-            }
-        };
-        initSession();
-
-        // Listen for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, authSession) => {
-            if (event === 'SIGNED_IN' && authSession?.user) {
+            } else if (event === 'SIGNED_IN' && authSession?.user) {
+                // SIGNED_IN fires on tab focus in some Supabase versions.
+                // If session is already loaded for the same user, skip full reload.
+                if (sessionLoadedRef.current) {
+                    console.log('Auth event: SIGNED_IN ignored (session already loaded)');
+                    return;
+                }
                 await loadUserSession(authSession.user.id);
+            } else if (event === 'TOKEN_REFRESHED' && authSession?.user) {
+                // TOKEN_REFRESHED fires when switching tabs; just ignore it.
+                // The Supabase client already updated the token internally.
+                console.log('Auth event: TOKEN_REFRESHED ignored (silent refresh)');
             } else if (event === 'SIGNED_OUT') {
+                sessionLoadedRef.current = false;
                 setSession(null);
                 clearAllData();
+                setIsLoading(false);
+            } else if (event === 'USER_UPDATED' && authSession?.user) {
+                sessionLoadedRef.current = false;
+                await loadUserSession(authSession.user.id);
             }
         });
 
-        return () => subscription.unsubscribe();
+        // Fallback: If after 3s we still haven't received an INITIAL_SESSION or SIGNED_IN event,
+        // manually check getSession to unblock the UI.
+        const timeoutId = setTimeout(async () => {
+            if (isLoading && !session) {
+                console.log('Session initialization timeout check...');
+                const { data: { session: currentSession } } = await supabase.auth.getSession();
+                if (currentSession?.user && !session) {
+                    await loadUserSession(currentSession.user.id);
+                } else if (!currentSession) {
+                    setIsLoading(false);
+                }
+            }
+        }, 3000);
+
+        return () => {
+            subscription.unsubscribe();
+            clearTimeout(timeoutId);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -193,12 +217,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const loadUserSession = async (userId: string): Promise<boolean> => {
-        if (loadingIds.current.has(userId)) return true;
+        if (loadingIds.current.has(userId)) {
+            console.log('loadUserSession: Already loading for user:', userId);
+            return true;
+        }
         loadingIds.current.add(userId);
+        setIsLoading(true);
 
         try {
-            // Reduced noise
-            // console.log('Fetching profile for user:', userId);
+            console.log('loadUserSession: Fetching profile for user:', userId);
             // 1. Get profile
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
@@ -209,17 +236,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (profileError || !profile) {
                 if (profileError) {
                     console.error('loadUserSession: Profile fetch error:', profileError);
-                    if (profileError.message?.includes('Failed to fetch') || profileError.message?.includes('timeout')) {
+                    // If it's a 406 or Not Found, the profile might be missing
+                    if (profileError.code === 'PGRST116') {
+                        console.warn('loadUserSession: Profile not found for user:', userId);
+                        await supabase.auth.signOut();
+                    } else if (profileError.message?.includes('Failed to fetch') || profileError.message?.includes('timeout')) {
                         toast.error('Erro de conexão com o servidor. Verifique sua internet.');
-                    } else {
-                        toast.error('Erro ao carregar perfil: ' + profileError.message);
                     }
-                } else {
-                    console.warn('loadUserSession: Profile not found for user:', userId);
-                    // If profile is missing (e.g. deleted), we should sign out
-                    await supabase.auth.signOut();
-                    setSession(null);
-                    clearAllData();
                 }
                 return false;
             }
@@ -263,6 +286,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
 
             setSession({ user, church });
+            // Mark session as loaded so TOKEN_REFRESHED / SIGNED_IN won't trigger a full reload
+            sessionLoadedRef.current = true;
 
             // 3. Load church data
             await loadChurchData(user.church_id, user.role);
@@ -276,6 +301,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return false;
         } finally {
             loadingIds.current.delete(userId);
+            setIsLoading(false);
         }
     };
 
@@ -344,81 +370,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const login = useCallback(async (email: string, password: string, slug?: string): Promise<boolean> => {
         setIsLoading(true);
         try {
+            console.log('Login attempt for:', email);
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
             if (error) {
                 toast.error(error.message === 'Invalid login credentials'
                     ? 'Email ou senha incorretos'
                     : error.message);
-                setIsLoading(false); // Immediate reset
-                return false;
-            }
-
-            if (!data.user) return false;
-
-            // Get the user's profile to check church association
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('*, churches:church_id(*)')
-                .eq('id', data.user.id)
-                .single();
-
-            if (!profile) {
-                console.error('login: Profile not found for user ID:', data.user.id);
-                toast.error('Perfil não encontrado no sistema.');
-                await supabase.auth.signOut();
                 setIsLoading(false);
                 return false;
             }
 
-            console.log('login: User authenticated, profile role:', profile.role);
-
-            // Check if user belongs to the correct church (by slug)
-            if (slug && slug !== 'superadmin' && profile.role !== 'super_admin') {
-                const { data: church } = await supabase
-                    .from('churches')
-                    .select('*')
-                    .eq('slug', slug)
-                    .single();
-
-                if (!church) {
-                    toast.error('Igreja não encontrada.');
-                    await supabase.auth.signOut();
-                    return false;
-                }
-
-                if (!church.is_active) {
-                    toast.error('Esta igreja está inativa. Entre em contato com o suporte.');
-                    await supabase.auth.signOut();
-                    return false;
-                }
-
-                if (profile.church_id !== church.id) {
-                    toast.error('Você não tem acesso a esta igreja.');
-                    await supabase.auth.signOut();
-                    return false;
-                }
+            if (!data.user) {
+                setIsLoading(false);
+                return false;
             }
 
-            // Session will be loaded via the onAuthStateChange listener
+            // We explicitly load the session here to ensure redirect happens only after data is ready
             const success = await loadUserSession(data.user.id);
-            if (!success) {
-                await supabase.auth.signOut();
-                setIsLoading(false);
-                return false;
-            }
-            return true;
+            return success;
         } catch (err: any) {
             console.error('Login exception:', err);
-            const isNetworkError = err?.message?.includes('fetch') || err?.message?.includes('Network');
-            toast.error(isNetworkError
-                ? 'Sua conexão com o servidor falhou. Verifique sua rede.'
-                : 'Ocorreu um erro inesperado ao fazer login.');
+            toast.error('Ocorreu um erro inesperado ao fazer login.');
             setIsLoading(false);
             return false;
-        } finally {
-            setIsLoading(false);
         }
+        // No setIsLoading(false) in finally here because loadUserSession or the redirect will handle it
     }, [supabase, loadUserSession]);
 
     const changePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<boolean> => {
