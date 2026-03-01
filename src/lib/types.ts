@@ -72,6 +72,7 @@ export interface Member {
     email: string;
     address: string;
     baptism_date?: string;
+    profession_faith_date?: string;
     join_date: string;
     age_group: AgeGroup;
     status: MemberStatus;

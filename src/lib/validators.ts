@@ -69,8 +69,10 @@ export function formatPhone(value: string): string {
     return digits.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 }
 
+import { AgeGroup } from './types';
+
 // ─── Dates ──────────────────────────────────────────────────
-export function calculateAgeGroup(birthDate: string): string {
+export function calculateAgeGroup(birthDate: string): AgeGroup {
     const today = new Date();
     const birth = new Date(birthDate + 'T12:00:00');
     let age = today.getFullYear() - birth.getFullYear();

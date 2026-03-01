@@ -27,6 +27,7 @@ export default function NovoMembroPage() {
     const [email, setEmail] = useState('');
     const [address, setAddress] = useState('');
     const [baptism, setBaptism] = useState('');
+    const [professionFaith, setProfessionFaith] = useState('');
     const [join, setJoin] = useState(new Date().toISOString().split('T')[0]);
     const [roomId, setRoomId] = useState('unassigned');
     const [status, setStatus] = useState<'ativo' | 'inativo' | 'visitante' | 'transferido'>('ativo');
@@ -86,6 +87,7 @@ export default function NovoMembroPage() {
             email: email.trim().toLowerCase(),
             address: address.trim(),
             baptism_date: baptism || undefined,
+            profession_faith_date: professionFaith || undefined,
             join_date: join,
             room_id: roomId === 'unassigned' ? null : roomId,
             status,
@@ -144,6 +146,10 @@ export default function NovoMembroPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="baptism">Data de Batismo</Label>
                                 <Input id="baptism" type="date" value={baptism} onChange={e => setBaptism(e.target.value)} max={new Date().toISOString().split('T')[0]} />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="profession-faith">Data de Profissão de Fé</Label>
+                                <Input id="profession-faith" type="date" value={professionFaith} onChange={e => setProfessionFaith(e.target.value)} max={new Date().toISOString().split('T')[0]} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="join">Data de Ingresso *</Label>

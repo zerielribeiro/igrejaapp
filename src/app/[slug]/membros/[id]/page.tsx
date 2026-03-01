@@ -41,6 +41,7 @@ export default function MemberDetailPage() {
         { icon: Calendar, label: 'Nascimento', value: new Date(member.birth_date).toLocaleDateString('pt-BR') },
         { icon: Calendar, label: 'Data de Ingresso', value: new Date(member.join_date).toLocaleDateString('pt-BR') },
         { icon: Calendar, label: 'Batismo', value: member.baptism_date ? new Date(member.baptism_date).toLocaleDateString('pt-BR') : 'Não informado' },
+        { icon: Calendar, label: 'Profissão de Fé', value: member.profession_faith_date ? new Date(member.profession_faith_date).toLocaleDateString('pt-BR') : 'Não informado' },
     ];
 
     const handleDelete = () => {

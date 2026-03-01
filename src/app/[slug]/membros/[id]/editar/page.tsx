@@ -30,6 +30,7 @@ export default function EditarMembroPage() {
     const [email, setEmail] = useState(member?.email || '');
     const [address, setAddress] = useState(member?.address || '');
     const [baptism, setBaptism] = useState(member?.baptism_date || '');
+    const [professionFaith, setProfessionFaith] = useState(member?.profession_faith_date || '');
     const [join, setJoin] = useState(member?.join_date || '');
     const [roomId, setRoomId] = useState(member?.room_id || 'unassigned');
     const [status, setStatus] = useState<'ativo' | 'inativo' | 'visitante' | 'transferido'>(
@@ -47,6 +48,7 @@ export default function EditarMembroPage() {
             setEmail(member.email || '');
             setAddress(member.address || '');
             setBaptism(member.baptism_date || '');
+            setProfessionFaith(member.profession_faith_date || '');
             setJoin(member.join_date || '');
             setRoomId(member.room_id || 'unassigned');
             setStatus(member.status || 'ativo');
@@ -81,6 +83,7 @@ export default function EditarMembroPage() {
             email: email.trim().toLowerCase(),
             address: address.trim(),
             baptism_date: baptism || undefined,
+            profession_faith_date: professionFaith || undefined,
             join_date: join,
             room_id: roomId,
             status,
@@ -132,6 +135,10 @@ export default function EditarMembroPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="baptism">Data de Batismo</Label>
                                 <Input id="baptism" type="date" value={baptism} onChange={e => setBaptism(e.target.value)} />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="profession-faith">Data de Profissão de Fé</Label>
+                                <Input id="profession-faith" type="date" value={professionFaith} onChange={e => setProfessionFaith(e.target.value)} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="join">Data de Ingresso *</Label>
