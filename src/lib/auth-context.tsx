@@ -163,16 +163,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     setIsLoading(false);
                 }
             } else if (event === 'SIGNED_IN' && authSession?.user) {
-                // Skip if already loading or already loaded
                 if (sessionLoadedRef.current || loadingIds.current.has(authSession.user.id)) {
                     console.log(`Auth event: SIGNED_IN ignored (already ${sessionLoadedRef.current ? 'loaded' : 'loading'})`);
                     return;
                 }
+                // FIX: ignorar SIGNED_IN durante inicialização — INITIAL_SESSION cuida disso
+                if (!initialLoadDone.current) {
+                    console.log('Auth event: SIGNED_IN ignored (INITIAL_SESSION pending)');
+                    return;
+                }
                 await loadUserSession(authSession.user.id);
             } else if (event === 'TOKEN_REFRESHED' && authSession?.user) {
-                // TOKEN_REFRESHED fires when switching tabs; just ignore it.
-                // The Supabase client already updated the token internally.
-                console.log('Auth event: TOKEN_REFRESHED ignored (silent refresh)');
+                console.log('Auth event: TOKEN_REFRESHED — session kept alive');
+                // FIX: garantir que a sessão não seja perdida após refresh longo
+                if (!sessionLoadedRef.current && !loadingIds.current.has(authSession.user.id)) {
+                    await loadUserSession(authSession.user.id);
+                }
             } else if (event === 'SIGNED_OUT') {
                 sessionLoadedRef.current = false;
                 initialLoadDone.current = false;
