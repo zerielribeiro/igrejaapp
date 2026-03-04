@@ -244,8 +244,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const startTime = Date.now();
 
         // Internal helper for queries with timeout
-        const fetchWithTimeout = async <T,>(promise: any, timeoutMs = 5000): Promise<T> => {
-            const timeoutPromise = new Promise<never>((_, reject) =>
+        const fetchWithTimeout = async <T,>(promise: Promise<{ data: T | null; error: any }> | any, timeoutMs = 5000): Promise<{ data: T | null; error: any }> => {
+            const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
                 setTimeout(() => reject(new Error('Query timeout')), timeoutMs)
             );
             return Promise.race([promise, timeoutPromise]);
@@ -549,7 +549,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const updateChurchData = useCallback(async (id: string, data: Partial<Church>): Promise<{ success: boolean; error?: string }> => {
         try {
             // SECURITY FIX: Whitelist allowed fields to prevent slug/plan/is_active injection
-            const allowedFields = ['name', 'cnpj', 'pastor', 'address', 'phone', 'email', 'website', 'description', 'logo_url'];
+            const allowedFields = ['name', 'cnpj', 'pastor', 'address', 'phone', 'email', 'website', 'description', 'logo_url', 'member_registration_enabled'];
             const sanitizedData: Record<string, unknown> = {};
             for (const key of allowedFields) {
                 if (key in data) {
@@ -813,20 +813,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const removeMember = useCallback(async (id: string): Promise<{ success: boolean, error?: string }> => {
         if (!session) return { success: false, error: 'Sessão não encontrada' };
         try {
+            console.log(`[removeMember] Attempting to remove member ${id} for church ${session.church.id}`);
             const { error } = await supabase
                 .from('members')
                 .delete()
                 .eq('id', id)
-                .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
+                .eq('church_id', session.church.id);
 
-            if (error) throw error;
+            if (error) {
+                console.error('[removeMember] Supabase Error:', error);
+                throw error;
+            }
+
             setAllMembers(prev => prev.filter(m => m.id !== id));
-            toast.success('Membro removido com sucesso.');
             return { success: true };
         } catch (err: any) {
-            console.error('[removeMember] Error:', err);
-            toast.error('Erro ao remover membro: ' + (err.message || 'Erro desconhecido'));
-            return { success: false, error: err.message || 'Erro ao remover membro' };
+            console.error('[removeMember] Full Error Object:', err);
+            const errorMessage = err.message || err.error_description || 'Erro técnico na conexão';
+            toast.error('Erro ao remover membro: ' + errorMessage);
+            return { success: false, error: errorMessage };
         }
     }, [session, supabase]);
 

@@ -287,6 +287,7 @@ function ChurchDataForm() {
     const [address, setAddress] = useState(session?.church.address || '');
     const [city, setCity] = useState(session?.church.city || '');
     const [phone, setPhone] = useState(session?.church.phone || '');
+    const [registrationEnabled, setRegistrationEnabled] = useState(session?.church.member_registration_enabled || false);
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
@@ -297,6 +298,7 @@ function ChurchDataForm() {
             setAddress(session.church.address || '');
             setCity(session.church.city || '');
             setPhone(session.church.phone || '');
+            setRegistrationEnabled(session.church.member_registration_enabled || false);
         }
     }, [session?.church]);
 
@@ -306,7 +308,7 @@ function ChurchDataForm() {
         setIsSaving(true);
         try {
             const { success, error } = await updateChurchData(session.church.id, {
-                name, cnpj, pastor, address, city, phone
+                name, cnpj, pastor, address, city, phone, member_registration_enabled: registrationEnabled
             });
             if (success) {
                 toast.success('Dados atualizados com sucesso!');
@@ -349,9 +351,50 @@ function ChurchDataForm() {
                     <Input value={phone} onChange={e => setPhone(e.target.value)} />
                 </div>
             </div>
-            <Button type="submit" disabled={isSaving} className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
-                <Save className="h-4 w-4 mr-1" /> {isSaving ? 'Salvando...' : 'Salvar Alterações'}
-            </Button>
+
+            <div className="pt-4 border-t space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                        <Label className="text-base font-semibold">Formulário de Cadastro Público</Label>
+                        <p className="text-xs text-muted-foreground">
+                            Permite que novos membros se cadastrem sem login através de um link temporário.
+                        </p>
+                    </div>
+                    <Switch
+                        checked={registrationEnabled}
+                        onCheckedChange={setRegistrationEnabled}
+                    />
+                </div>
+                {registrationEnabled && (
+                    <div className="bg-muted/50 p-3 rounded-lg space-y-2 border">
+                        <p className="text-xs font-medium text-muted-foreground">Link para divulgação:</p>
+                        <div className="flex items-center gap-2">
+                            <code className="text-[10px] bg-background px-2 py-1 rounded border flex-1 truncate">
+                                {typeof window !== 'undefined' ? `${window.location.origin}/${session?.church.slug}/registro` : `/${session?.church.slug}/registro`}
+                            </code>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-[10px]"
+                                onClick={() => {
+                                    const url = `${window.location.origin}/${session?.church.slug}/registro`;
+                                    navigator.clipboard.writeText(url);
+                                    toast.success('Link copiado!');
+                                }}
+                            >
+                                Copiar
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className="pt-2">
+                <Button type="submit" disabled={isSaving} className="w-full sm:w-auto bg-secondary text-secondary-foreground hover:bg-secondary/90">
+                    <Save className="h-4 w-4 mr-1" /> {isSaving ? 'Salvando...' : 'Salvar Alterações'}
+                </Button>
+            </div>
         </form>
     );
 }

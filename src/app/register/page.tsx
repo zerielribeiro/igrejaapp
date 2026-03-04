@@ -131,7 +131,7 @@ export default function RegisterPage() {
                 <div className="text-center mt-6 space-y-2">
                     <p className="text-sm text-muted-foreground">
                         Já tem uma conta?{' '}
-                        <Link href="/igreja-batista-central/login" className="text-primary hover:underline">
+                        <Link href="/login" className="text-primary hover:underline">
                             Fazer login
                         </Link>
                     </p>

@@ -43,7 +43,7 @@ export default function TenantLayout({ children }: { children: React.ReactNode }
         toast.success('Logout realizado');
     };
 
-    const isPublicPage = pathname.endsWith('/login') || pathname.endsWith('/register') || pathname === '/';
+    const isPublicPage = pathname.endsWith('/login') || pathname.endsWith('/register') || pathname.endsWith('/registro') || pathname === '/';
 
     if (isPublicPage) {
         return <div className="min-h-screen bg-background">{children}</div>;

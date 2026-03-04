@@ -5,6 +5,7 @@ import { Church, Users, ClipboardCheck, BarChart3, DollarSign, Shield, ArrowRigh
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/lib/auth-context';
 
 const features = [
   { icon: Users, title: 'Gestão de Membros', desc: 'Cadastro completo com foto, documentos, classificação por faixa etária e muito mais.' },
@@ -14,8 +15,12 @@ const features = [
   { icon: Shield, title: 'Multi-Tenant Seguro', desc: 'Cada igreja com dados isolados. Máxima segurança e privacidade.' },
   { icon: Star, title: 'Fácil de Usar', desc: 'Design moderno, responsivo e intuitivo. Funciona em qualquer dispositivo.' },
 ];
-
 export default function LandingPage() {
+  const { session } = useAuth();
+  const loginLink = session
+    ? (session.user.role === 'super_admin' ? '/superadmin' : `/${session.church.slug}/dashboard`)
+    : '/login';
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -28,8 +33,10 @@ export default function LandingPage() {
             <span className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Igreja App</span>
           </Link>
           <div className="flex items-center gap-3">
-            <Link href="/igreja-batista-central/login">
-              <Button variant="ghost" size="sm">Entrar</Button>
+            <Link href={loginLink}>
+              <Button variant="ghost" size="sm">
+                {session ? 'Acessar Painel' : 'Entrar'}
+              </Button>
             </Link>
             <Link href="/register">
               <Button size="sm" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
@@ -63,7 +70,7 @@ export default function LandingPage() {
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </Link>
-              <Link href="/igreja-batista-central/dashboard">
+              <Link href="/login">
                 <Button size="lg" variant="outline" className="px-8 text-base">
                   Ver Demo
                 </Button>

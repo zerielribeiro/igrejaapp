@@ -10,6 +10,17 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function MemberDetailPage() {
     const params = useParams();
@@ -45,11 +56,9 @@ export default function MemberDetailPage() {
     ];
 
     const handleDelete = () => {
-        if (confirm('Tem certeza que deseja excluir este membro?')) {
-            removeMember(member.id);
-            toast.success('Membro excluído com sucesso');
-            router.push(`/${slug}/membros`);
-        }
+        removeMember(member.id);
+        toast.success('Membro excluído com sucesso');
+        router.push(`/${slug}/membros`);
     };
 
     return (
@@ -62,9 +71,27 @@ export default function MemberDetailPage() {
                     <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Detalhes do Membro</h1>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="destructive" size="sm" onClick={handleDelete}>
-                        <Trash2 className="h-4 w-4 mr-1" /> Excluir
-                    </Button>
+                    <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button variant="destructive" size="sm">
+                                <Trash2 className="h-4 w-4 mr-1" /> Excluir
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o cadastro de <strong>{member.full_name}</strong> do sistema.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                    Sim, excluir membro
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
                     <Link href={`/${slug}/membros/${member.id}/editar`}>
                         <Button size="sm" className="bg-secondary text-secondary-foreground hover:bg-secondary/90">
                             <Edit className="h-4 w-4 mr-1" /> Editar

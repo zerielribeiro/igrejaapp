@@ -44,6 +44,7 @@ export interface Church {
     logo?: string;
     plan: PlanType;
     is_active: boolean;
+    member_registration_enabled?: boolean;
     created_at: string;
     members_count?: number;
 }
