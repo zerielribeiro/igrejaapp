@@ -143,7 +143,12 @@ export default function PublicRegistrationPage() {
             });
 
             if (error) {
-                toast.error(error.message || 'Erro ao realizar cadastro.');
+                // Friendly error for duplicate CPF
+                if (error.message?.includes('members_church_id_cpf_key')) {
+                    toast.error('Este CPF já está cadastrado em nossa igreja.');
+                } else {
+                    toast.error(error.message || 'Erro ao realizar cadastro.');
+                }
                 return;
             }
 
