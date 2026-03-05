@@ -53,7 +53,7 @@ export function ChangePasswordDialog({ trigger, open, onOpenChange }: ChangePass
 
         setIsLoading(true);
         try {
-            const success = await changePassword(currentPassword, newPassword);
+            const { success, error } = await changePassword(currentPassword, newPassword);
             if (success) {
                 toast.success('Senha alterada com sucesso!');
                 setIsOpen(false);
@@ -61,8 +61,11 @@ export function ChangePasswordDialog({ trigger, open, onOpenChange }: ChangePass
                 setNewPassword('');
                 setConfirmPassword('');
             } else {
-                toast.error('Erro ao alterar senha. Verifique sua conexão.');
+                toast.error(error || 'Erro ao alterar senha.');
             }
+        } catch (err: any) {
+            console.error('handleSubmit error:', err);
+            toast.error('Erro inesperado ao alterar senha.');
         } finally {
             setIsLoading(false);
         }

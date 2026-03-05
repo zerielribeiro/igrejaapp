@@ -110,8 +110,8 @@ export default function ChamadaPage() {
         e.preventDefault();
         if (!visitorForm.name.trim()) { toast.error('O nome é obrigatório.'); return; }
         setSavingVisitor(true);
-        await new Promise(r => setTimeout(r, 300));
-        addVisitor({
+
+        const { success, error } = await addVisitor({
             name: visitorForm.name.trim(),
             address: visitorForm.address.trim(),
             phone: visitorForm.phone.trim(),
@@ -119,10 +119,16 @@ export default function ChamadaPage() {
             room_name: selectedRoomName,
             session_date: selectedDate,
         });
-        toast.success(`Visitante "${visitorForm.name}" cadastrado com sucesso!`);
+
+        if (success) {
+            toast.success(`Visitante "${visitorForm.name}" cadastrado com sucesso!`);
+            setVisitorModalOpen(false);
+            setHasUnsavedChanges(true); // Visitor added is a change that needs finalizing
+        } else {
+            toast.error(error || 'Erro ao cadastrar visitante.');
+        }
+
         setSavingVisitor(false);
-        setVisitorModalOpen(false);
-        setHasUnsavedChanges(true); // Visitor added is a change that needs finalizing
     };
 
     const finalize = async () => {

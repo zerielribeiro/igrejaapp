@@ -9,6 +9,7 @@ import {
 } from './types';
 import { toast } from 'sonner';
 import { createClient } from './supabase/client';
+import { getFriendlyErrorMessage } from './validators';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 // ─── Permission Groups ────────────────────────────────────────────
@@ -48,28 +49,28 @@ interface AuthContextType {
     rolePermissions: RolePermission[];
     login: (email: string, password: string, slug?: string) => Promise<boolean>;
     logout: () => void;
-    registerChurch: (data: NewChurchData) => Promise<boolean>;
+    registerChurch: (data: NewChurchData) => Promise<{ success: boolean; error?: string }>;
     isLoading: boolean;
     hasRole: (...roles: UserRole[]) => boolean;
-    changePassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
+    changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
     // Churches (Super Admin)
     churches: Church[];
     updateChurchStatus: (id: string, isActive: boolean) => void;
     updateChurchData: (id: string, data: Partial<Church>) => Promise<{ success: boolean; error?: string }>;
     deleteChurch: (id: string) => Promise<{ success: boolean; error?: string }>;
     // Users CRUD
-    addUser: (data: NewUserData) => void;
-    updateUser: (id: string, data: Partial<User>) => void;
-    deleteUser: (id: string) => void;
+    addUser: (data: NewUserData) => Promise<{ success: boolean; error?: string }>;
+    updateUser: (id: string, data: Partial<User>) => Promise<{ success: boolean; error?: string }>;
+    deleteUser: (id: string) => Promise<{ success: boolean; error?: string }>;
     // Rooms CRUD
     addRoom: (data: NewRoomData) => Promise<{ success: boolean, error?: string }>;
     updateRoom: (id: string, data: Partial<Room>) => Promise<{ success: boolean, error?: string }>;
     deleteRoom: (id: string) => Promise<{ success: boolean, error?: string }>;
     // Permissions CRUD
-    updateRolePermission: (role: UserRole, modules: Record<string, boolean>) => void;
+    updateRolePermission: (role: UserRole, modules: Record<string, boolean>) => Promise<{ success: boolean; error?: string }>;
     // Visitors
     visitors: Visitor[];
-    addVisitor: (data: NewVisitorData) => void;
+    addVisitor: (data: NewVisitorData) => Promise<{ success: boolean; error?: string }>;
     // Members
     members: Member[];
     addMember: (data: NewMemberData) => Promise<{ success: boolean, error?: string }>;
@@ -445,37 +446,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // No setIsLoading(false) in finally here because loadUserSession or the redirect will handle it
     }, [supabase, loadUserSession]);
 
-    const changePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<boolean> => {
+    const changePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
         try {
-            // SECURITY FIX: Verify current password before changing
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user?.email) return false;
+            if (!user?.email) return { success: false, error: 'Usuário não autenticado.' };
 
             const { error: verifyError } = await supabase.auth.signInWithPassword({
                 email: user.email,
                 password: currentPassword,
             });
             if (verifyError) {
-                toast.error('Senha atual incorreta.');
-                return false;
+                return { success: false, error: 'Senha atual incorreta.' };
             }
 
             if (newPassword.length < 6) {
-                toast.error('A nova senha deve ter pelo menos 6 caracteres.');
-                return false;
+                return { success: false, error: 'A nova senha deve ter pelo menos 6 caracteres.' };
             }
 
             const { error } = await supabase.auth.updateUser({ password: newPassword });
             if (error) {
                 console.error('Password change error:', error);
-                toast.error('Erro ao alterar senha: ' + error.message);
-                return false;
+                return { success: false, error: getFriendlyErrorMessage(error) };
             }
-            toast.success('Senha alterada com sucesso!');
-            return true;
-        } catch {
-            toast.error('Erro inesperado ao alterar senha.');
-            return false;
+            return { success: true };
+        } catch (err: any) {
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [supabase]);
 
@@ -490,7 +485,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return roles.includes(session.user.role);
     }, [session]);
 
-    const registerChurch = useCallback(async (data: NewChurchData) => {
+    const registerChurch = useCallback(async (data: NewChurchData): Promise<{ success: boolean; error?: string }> => {
         try {
             // Use the RPC for atomic and fast registration
             const { data: newChurch, error: rpcError } = await supabase.rpc('register_new_church', {
@@ -503,15 +498,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (rpcError || !newChurch) {
                 console.error('Registration RPC error:', rpcError);
-                // Show the user-friendly error from the RPC
-                const msg = rpcError?.message || 'Erro ao registrar igreja no servidor.';
-                toast.error(msg);
-                return false;
+                return { success: false, error: getFriendlyErrorMessage(rpcError) };
             }
 
-            // FIX: Auto sign-in using proper async flow (no more setTimeout race condition)
+            // Auto sign-in
             try {
-                console.log('Attempting auto sign-in for:', data.email);
                 const signInResult = await supabase.auth.signInWithPassword({
                     email: data.email,
                     password: data.password,
@@ -519,18 +510,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
                 if (!signInResult.error && signInResult.data?.user) {
                     await loadUserSession(signInResult.data.user.id);
-                    toast.success('Bem-vindo ao sistema!');
                 }
             } catch (e) {
                 console.error('Auto-login failed:', e);
-                // Non-blocking: registration succeeded, user can login manually
             }
 
-            return true;
+            return { success: true };
         } catch (err: any) {
             console.error('Registration error details:', err);
-            toast.error(err?.message || 'Erro inesperado ao registrar. Tente novamente.');
-            return false;
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [supabase, loadUserSession]);
 
@@ -581,7 +569,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('Error updating church data:', err);
-            return { success: false, error: err.message || 'Erro desconhecido ao atualizar os dados da igreja.' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [supabase]);
 
@@ -599,7 +587,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (!result?.success) {
                 const msg = result?.error || 'Erro ao excluir a igreja.';
                 console.error('deleteChurch failed:', msg);
-                return { success: false, error: msg };
+                return { success: false, error: getFriendlyErrorMessage(msg) };
             }
 
             // Remove church from local state
@@ -610,16 +598,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('Exception in deleteChurch:', err);
-            return { success: false, error: err.message || 'Erro inesperado ao excluir a igreja.' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [supabase]);
 
     // ─── Users CRUD ───────────────────────────────────────────────
-    const addUser = useCallback(async (data: NewUserData) => {
-        if (!session) return;
+    const addUser = useCallback(async (data: NewUserData): Promise<{ success: boolean; error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada.' };
 
         try {
-            // Create user using the RPC to bypass email confirmation and slowness
             const { data: newProfile, error } = await supabase.rpc('admin_create_user', {
                 p_email: data.email,
                 p_password: data.password || 'temp123456',
@@ -630,22 +617,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (error || !newProfile) {
                 console.error('Admin create user error:', error);
-                toast.error('Erro ao criar usuário: ' + (error?.message || 'Erro desconhecido.'));
-                throw error;
+                return { success: false, error: getFriendlyErrorMessage(error) };
             }
 
-            // The RPC returns the new profile as jsonb
             setAllUsers(prev => [...prev, mapProfile(newProfile as any)]);
-            toast.success('Usuário criado com sucesso!');
-        } catch (error) {
+            return { success: true };
+        } catch (error: any) {
             console.error('Add user error:', error);
-            throw error;
+            return { success: false, error: getFriendlyErrorMessage(error) };
         }
     }, [session, supabase]);
 
 
 
-    const updateUser = useCallback(async (id: string, data: Partial<User>) => {
+    const updateUser = useCallback(async (id: string, data: Partial<User>): Promise<{ success: boolean; error?: string }> => {
         try {
             const { data: updatedProfile, error } = await supabase.rpc('admin_update_user', {
                 p_user_id: id,
@@ -657,39 +642,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (error) {
                 console.error('Error updating user via RPC:', error);
-                toast.error('Erro ao atualizar usuário: ' + (error.message || 'Erro desconhecido.'));
-                throw error;
+                return { success: false, error: getFriendlyErrorMessage(error) };
             }
 
             if (updatedProfile) {
                 setAllUsers(prev => prev.map(u => u.id === id ? mapProfile(updatedProfile as any) : u));
             }
+            return { success: true };
         } catch (error: any) {
             console.error('Update user catch error:', error);
-            throw error;
+            return { success: false, error: getFriendlyErrorMessage(error) };
         }
     }, [supabase]);
 
-    const deleteUser = useCallback(async (id: string) => {
-        // Use RPC to delete both profile and auth user
-        const { error } = await supabase
-            .rpc('delete_user_complete', { target_user_id: id });
+    const deleteUser = useCallback(async (id: string): Promise<{ success: boolean; error?: string }> => {
+        try {
+            const { error } = await supabase.rpc('delete_user_complete', { target_user_id: id });
 
-        if (error) {
-            console.error('Error deleting user:', error);
-            // Try fallback delete if RPC fails (e.g. if function doesn't exist yet in user's instance)
-            const { error: fallbackError } = await supabase
-                .from('profiles')
-                .delete()
-                .eq('id', id);
+            if (error) {
+                console.error('Error deleting user:', error);
+                const { error: fallbackError } = await supabase
+                    .from('profiles')
+                    .delete()
+                    .eq('id', id);
 
-            if (fallbackError) {
-                toast.error('Erro ao excluir usuário: ' + (error.message || fallbackError.message));
-                throw fallbackError;
+                if (fallbackError) {
+                    return { success: false, error: getFriendlyErrorMessage(fallbackError) };
+                }
             }
-        }
 
-        setAllUsers(prev => prev.filter(u => u.id !== id));
+            setAllUsers(prev => prev.filter(u => u.id !== id));
+            return { success: true };
+        } catch (error: any) {
+            return { success: false, error: getFriendlyErrorMessage(error) };
+        }
     }, [supabase]);
 
 
@@ -718,7 +704,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: false, error: 'Erro desconhecido ao criar sala' };
         } catch (err: any) {
             console.error('[addRoom] Error:', err);
-            return { success: false, error: err.message || 'Erro ao criar sala' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -736,7 +722,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('[updateRoom] Error:', err);
-            return { success: false, error: err.message || 'Erro ao atualizar sala' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -761,7 +747,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('[deleteRoom] Error:', err);
-            return { success: false, error: err.message || 'Erro ao excluir sala' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase, allMembers]);
 
@@ -787,7 +773,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: false, error: 'Erro desconhecido ao cadastrar membro' };
         } catch (err: any) {
             console.error('[addMember] Error:', err);
-            return { success: false, error: err.message || 'Erro ao cadastrar membro' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -805,8 +791,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('[updateMember] Error:', err);
-            toast.error('Erro ao atualizar membro: ' + (err.message || 'Erro desconhecido'));
-            return { success: false, error: err.message || 'Erro ao atualizar membro' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -829,9 +814,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('[removeMember] Full Error Object:', err);
-            const errorMessage = err.message || err.error_description || 'Erro técnico na conexão';
-            toast.error('Erro ao remover membro: ' + errorMessage);
-            return { success: false, error: errorMessage };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -862,7 +845,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: false, error: 'Erro desconhecido ao registrar transação' };
         } catch (err: any) {
             console.error('[addTransaction] Error:', err);
-            return { success: false, error: err.message || 'Erro ao registrar transação' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -887,7 +870,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: false, error: 'Erro desconhecido ao adicionar categoria' };
         } catch (err: any) {
             console.error('[addCategory] Error:', err);
-            return { success: false, error: err.message || 'Erro ao adicionar categoria' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -905,7 +888,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('[updateCategory] Error:', err);
-            return { success: false, error: err.message || 'Erro ao atualizar categoria' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -923,7 +906,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: true };
         } catch (err: any) {
             console.error('[deleteCategory] Error:', err);
-            return { success: false, error: err.message || 'Erro ao excluir categoria' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
@@ -958,64 +941,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { success: false, error: 'Erro desconhecido ao salvar chamada' };
         } catch (err: any) {
             console.error('[saveAttendanceSession] Error:', err);
-            return { success: false, error: err.message || 'Erro ao salvar chamada' };
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
 
     // ─── Visitors ─────────────────────────────────────────────────
-    const addVisitor = useCallback(async (data: NewVisitorData) => {
-        if (!session) return;
+    const addVisitor = useCallback(async (data: NewVisitorData): Promise<{ success: boolean; error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada.' };
 
-        if (!data.name?.trim()) {
-            toast.error('O nome do visitante é obrigatório.');
-            return;
-        }
+        try {
+            const { data: newVisitor, error } = await supabase
+                .from('visitors')
+                .insert([{
+                    church_id: session.church.id,
+                    room_id: data.room_id,
+                    room_name: data.room_name,
+                    session_date: data.session_date,
+                    name: data.name.trim(),
+                    address: data.address?.trim() || null,
+                    phone: data.phone?.trim() || null,
+                }])
+                .select()
+                .single();
 
-        const { data: newVisitor, error } = await supabase
-            .from('visitors')
-            .insert({
-                church_id: session.church.id,
-                room_id: data.room_id,
-                room_name: data.room_name,
-                session_date: data.session_date,
-                name: data.name.trim(),
-                address: data.address?.trim() || null,
-                phone: data.phone?.trim() || null,
-            })
-            .select()
-            .single();
+            if (error) {
+                console.error('[addVisitor] Error:', error);
+                return { success: false, error: getFriendlyErrorMessage(error) };
+            }
 
-        if (!error && newVisitor) {
             setAllVisitors(prev => [...prev, newVisitor as Visitor]);
-            toast.success('Visitante registrado com sucesso!');
-        } else if (error) {
-            console.error('[addVisitor] Error:', error);
-            toast.error('Erro ao registrar visitante: ' + (error.message || 'Erro desconhecido'));
+            return { success: true };
+        } catch (err: any) {
+            console.error('[addVisitor] Catch error:', err);
+            return { success: false, error: getFriendlyErrorMessage(err) };
         }
     }, [session, supabase]);
 
     // ─── Permissions CRUD ─────────────────────────────────────────
-    const updateRolePermission = useCallback(async (role: UserRole, modules: Record<string, boolean>) => {
-        if (!session) return;
+    const updateRolePermission = useCallback(async (role: UserRole, modules: Record<string, boolean>): Promise<{ success: boolean; error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada.' };
 
-        const safeModules = role === 'admin'
-            ? { ...modules, configuracoes: true }
-            : modules;
+        try {
+            const safeModules = role === 'admin'
+                ? { ...modules, configuracoes: true }
+                : modules;
 
-        // Update in DB
-        await supabase
-            .from('role_permissions')
-            .update({ modules: safeModules })
-            .eq('church_id', session.church.id)
-            .eq('role', role);
+            // Update in DB
+            const { error } = await supabase
+                .from('role_permissions')
+                .update({ modules: safeModules })
+                .eq('church_id', session.church.id)
+                .eq('role', role);
 
-        setRolePermissions(prev =>
-            prev.map(rp => {
-                if (rp.role !== role) return rp;
-                return { ...rp, modules: safeModules };
-            })
-        );
+            if (error) {
+                console.error('[updateRolePermission] Error:', error);
+                return { success: false, error: getFriendlyErrorMessage(error) };
+            }
+
+            setRolePermissions(prev =>
+                prev.map(rp => {
+                    if (rp.role !== role) return rp;
+                    return { ...rp, modules: safeModules };
+                })
+            );
+            return { success: true };
+        } catch (err: any) {
+            console.error('[updateRolePermission] Catch error:', err);
+            return { success: false, error: getFriendlyErrorMessage(err) };
+        }
     }, [session, supabase]);
 
     return (

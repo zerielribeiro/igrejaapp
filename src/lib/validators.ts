@@ -179,6 +179,19 @@ export function getFriendlyErrorMessage(error: any): string {
         return 'Já existe uma chamada registrada para esta sala nesta data.';
     }
 
+    if (message.includes('role_permissions_church_id_role_key') || details.includes('role_permissions_church_id_role_key')) {
+        return 'Já existem permissões configuradas para este cargo.';
+    }
+
+    // Generic constraint violations
+    if (message.includes('violates foreign key constraint') || details.includes('violates foreign key constraint')) {
+        return 'Este item não pode ser excluído ou alterado pois está sendo usado em outro lugar.';
+    }
+
+    if (message.includes('violates check constraint') || details.includes('violates check constraint')) {
+        return 'Os dados fornecidos não atendem às regras de validação do sistema.';
+    }
+
     // Default messages for common patterns
     if (message.includes('JWT')) {
         return 'Sua sessão expirou. Por favor, faça login novamente.';
@@ -188,5 +201,5 @@ export function getFriendlyErrorMessage(error: any): string {
         return 'Erro de conexão. Verifique sua internet.';
     }
 
-    return message || 'Ocorreu um erro ao processar sua solicitação.';
+    return message || 'Ocorreu um erro ao processar sua solicitação. Tente novamente.';
 }

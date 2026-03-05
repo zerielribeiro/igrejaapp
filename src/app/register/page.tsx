@@ -42,7 +42,7 @@ export default function RegisterPage() {
         }
         setIsLoading(true);
         try {
-            const success = await registerChurch({
+            const { success, error } = await registerChurch({
                 churchName: normalizeName(formData.churchName),
                 slug: formData.slug.trim().toLowerCase(),
                 pastor: normalizeName(formData.pastor),
@@ -52,9 +52,12 @@ export default function RegisterPage() {
             if (success) {
                 toast.success('Igreja cadastrada com sucesso!');
                 router.push(`/${formData.slug}/login`);
+            } else {
+                toast.error(error || 'Erro ao cadastrar igreja.');
             }
         } catch (error) {
             console.error('Registration page error:', error);
+            toast.error('Erro inesperado ao cadastrar igreja.');
         } finally {
             setIsLoading(false);
         }

@@ -425,26 +425,41 @@ export default function ConfiguracoesPage() {
             if (editingUser) {
                 // Remove password from payload when updating, just in case
                 const { password, ...updateData } = data;
-                await updateUser(editingUser.id, updateData);
-                toast.success('Usuário atualizado com sucesso!');
+                const { success, error } = await updateUser(editingUser.id, updateData);
+                if (success) {
+                    toast.success('Usuário atualizado com sucesso!');
+                    setUserDialogOpen(false);
+                } else {
+                    toast.error(error || 'Erro ao atualizar usuário.');
+                }
             } else {
-                await addUser(data);
-                toast.success('Usuário adicionado com sucesso!');
+                const { success, error } = await addUser(data);
+                if (success) {
+                    toast.success('Usuário adicionado com sucesso!');
+                    setUserDialogOpen(false);
+                } else {
+                    toast.error(error || 'Erro ao adicionar usuário.');
+                }
             }
-            setUserDialogOpen(false);
         } catch (error) {
-            // Error toast handled by AuthContext
+            console.error('handleSaveUser error:', error);
+            toast.error('Erro inesperado ao salvar usuário.');
         }
     };
     const handleDeleteUser = (id: string) => { setDeleteUserId(id); };
     const confirmDeleteUser = async () => {
         if (deleteUserId) {
             try {
-                await deleteUser(deleteUserId);
-                toast.success('Usuário removido.');
-                setDeleteUserId(null);
+                const { success, error } = await deleteUser(deleteUserId);
+                if (success) {
+                    toast.success('Usuário removido.');
+                    setDeleteUserId(null);
+                } else {
+                    toast.error(error || 'Erro ao remover usuário.');
+                }
             } catch (error) {
-                // Error toast handled by AuthContext
+                console.error('confirmDeleteUser error:', error);
+                toast.error('Erro inesperado ao remover usuário.');
             }
         }
     };
@@ -489,10 +504,15 @@ export default function ConfiguracoesPage() {
 
     // ─── Permission handlers
     const handleEditPermission = (rp: RolePermission) => { setEditingRolePermission(rp); setPermDialogOpen(true); };
-    const handleSavePermissions = (modules: Record<string, boolean>) => {
+    const handleSavePermissions = async (modules: Record<string, boolean>) => {
         if (editingRolePermission) {
-            updateRolePermission(editingRolePermission.role, modules);
-            toast.success('Permissões atualizadas!');
+            const { success, error } = await updateRolePermission(editingRolePermission.role, modules);
+            if (success) {
+                toast.success('Permissões atualizadas!');
+                setPermDialogOpen(false);
+            } else {
+                toast.error(error || 'Erro ao atualizar permissões.');
+            }
         }
     };
 
