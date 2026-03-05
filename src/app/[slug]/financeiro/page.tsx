@@ -15,7 +15,7 @@ import { useAuth } from '@/lib/auth-context';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { toast } from 'sonner';
-import { maskCurrency, parseCurrency, normalizeName, formatCurrency } from '@/lib/validators';
+import { maskCurrency, parseCurrency, normalizeName, formatCurrency, getFriendlyErrorMessage } from '@/lib/validators';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -76,7 +76,7 @@ export default function FinanceiroPage() {
         return Object.entries(counts).map(([category, amount]) => ({ category, amount }));
     }, [expenses]);
 
-    const handleSaveTransaction = (e: React.FormEvent) => {
+    const handleSaveTransaction = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!category || !amount || !description) {
             toast.error('Preencha todos os campos obrigatórios.');
@@ -89,53 +89,64 @@ export default function FinanceiroPage() {
             return;
         }
 
-        addTransaction({
+        const { success, error } = await addTransaction({
             type,
             category: normalizeName(category),
             description: normalizeName(description),
             amount: parsedAmount,
             transaction_date: date,
         });
-        toast.success('Transação registrada!');
-        setDialogOpen(false);
-        // Reset form
-        setCategory('');
-        setDescription('');
-        setAmount('');
+
+        if (success) {
+            toast.success('Transação registrada!');
+            setDialogOpen(false);
+            // Reset form
+            setCategory('');
+            setDescription('');
+            setAmount('');
+        } else {
+            toast.error(getFriendlyErrorMessage(error));
+        }
     };
 
     const handleAddCategory = async (typeToAdd: 'entrada' | 'saida') => {
         const name = newCatNames[typeToAdd];
         if (!name.trim()) return;
-        await addCategory({
+        const { success, error } = await addCategory({
             name: name.trim(),
             type: typeToAdd
         });
-        setNewCatNames(prev => ({ ...prev, [typeToAdd]: '' }));
+
+        if (success) {
+            toast.success('Categoria adicionada!');
+            setNewCatNames(prev => ({ ...prev, [typeToAdd]: '' }));
+        } else {
+            toast.error(getFriendlyErrorMessage(error));
+        }
     };
 
     const handleUpdateCategory = async (id: string) => {
         if (!editingCatName.trim()) return;
-        try {
-            await updateCategory(id, editingCatName.trim());
+        const { success, error } = await updateCategory(id, editingCatName.trim());
+        if (success) {
+            toast.success('Categoria atualizada!');
             setEditingCatId(null);
-        } catch (err) {
-            console.error('Frontend error updating cat:', err);
+        } else {
+            toast.error(getFriendlyErrorMessage(error));
         }
     };
 
     const confirmDeleteCategory = async () => {
         if (!catToDelete) return;
         setIsDeleting(true);
-        try {
-            console.log('Disparando exclusão da categoria:', catToDelete);
-            await deleteCategory(catToDelete);
-            console.log('Exclusão concluída no frontend');
-        } catch (err) {
-            console.error('Erro ao chamar deleteCategory:', err);
-        } finally {
-            setIsDeleting(false);
+        const { success, error } = await deleteCategory(catToDelete);
+        setIsDeleting(false);
+
+        if (success) {
+            toast.success('Categoria excluída!');
             setCatToDelete(null);
+        } else {
+            toast.error(getFriendlyErrorMessage(error));
         }
     };
 

@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { getFriendlyErrorMessage } from '@/lib/validators';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -55,10 +56,14 @@ export default function MemberDetailPage() {
         { icon: Calendar, label: 'Profissão de Fé', value: member.profession_faith_date ? new Date(member.profession_faith_date).toLocaleDateString('pt-BR') : 'Não informado' },
     ];
 
-    const handleDelete = () => {
-        removeMember(member.id);
-        toast.success('Membro excluído com sucesso');
-        router.push(`/${slug}/membros`);
+    const handleDelete = async () => {
+        const { success, error } = await removeMember(member.id);
+        if (success) {
+            toast.success('Membro excluído com sucesso');
+            router.push(`/${slug}/membros`);
+        } else {
+            toast.error(getFriendlyErrorMessage(error));
+        }
     };
 
     return (

@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
-import { normalizeName, formatCPF, formatPhone, isValidCPF, isReasonableDate } from '@/lib/validators';
+import { normalizeName, formatCPF, formatPhone, isValidCPF, isReasonableDate, getFriendlyErrorMessage } from '@/lib/validators';
 
 const INITIAL_FORM_DATA = {
     full_name: '',
@@ -143,12 +143,7 @@ export default function PublicRegistrationPage() {
             });
 
             if (error) {
-                // Friendly error for duplicate CPF
-                if (error.message?.includes('members_church_id_cpf_key')) {
-                    toast.error('Este CPF já está cadastrado em nossa igreja.');
-                } else {
-                    toast.error(error.message || 'Erro ao realizar cadastro.');
-                }
+                toast.error(getFriendlyErrorMessage(error));
                 return;
             }
 

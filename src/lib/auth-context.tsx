@@ -73,18 +73,18 @@ interface AuthContextType {
     // Members
     members: Member[];
     addMember: (data: NewMemberData) => Promise<{ success: boolean, error?: string }>;
-    updateMember: (id: string, data: Partial<Member>) => void;
-    removeMember: (id: string) => void;
+    updateMember: (id: string, data: Partial<Member>) => Promise<{ success: boolean, error?: string }>;
+    removeMember: (id: string) => Promise<{ success: boolean, error?: string }>;
     // Financials
     transactions: FinancialTransaction[];
-    addTransaction: (data: NewTransactionData) => void;
+    addTransaction: (data: NewTransactionData) => Promise<{ success: boolean, error?: string }>;
     categories: FinancialCategory[];
-    addCategory: (data: NewCategoryData) => Promise<void>;
-    updateCategory: (id: string, name: string) => Promise<void>;
-    deleteCategory: (id: string) => Promise<void>;
+    addCategory: (data: NewCategoryData) => Promise<{ success: boolean, error?: string }>;
+    updateCategory: (id: string, name: string) => Promise<{ success: boolean, error?: string }>;
+    deleteCategory: (id: string) => Promise<{ success: boolean, error?: string }>;
     // Attendance
     attendanceSessions: AttendanceSession[];
-    saveAttendanceSession: (data: NewAttendanceSessionData) => Promise<AttendanceSession | null>;
+    saveAttendanceSession: (data: NewAttendanceSessionData) => Promise<{ success: boolean, error?: string, data?: AttendanceSession }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -836,125 +836,130 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [session, supabase]);
 
     // ─── Financials CRUD ──────────────────────────────────────────
-    const addTransaction = useCallback(async (data: Omit<FinancialTransaction, 'id' | 'church_id' | 'created_at'>) => {
-        if (!session) return;
+    const addTransaction = useCallback(async (data: Omit<FinancialTransaction, 'id' | 'church_id' | 'created_at'>): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
 
         // Validation: amount must be positive
         if (!data.amount || data.amount <= 0) {
-            toast.error('O valor da transação deve ser maior que zero.');
-            return;
+            return { success: false, error: 'O valor da transação deve ser maior que zero.' };
         }
 
-        const { data: newTx, error } = await supabase
-            .from('financial_transactions')
-            .insert({
-                ...data,
-                church_id: session.church.id,
-            })
-            .select()
-            .single();
+        try {
+            const { data: newTx, error } = await supabase
+                .from('financial_transactions')
+                .insert({
+                    ...data,
+                    church_id: session.church.id,
+                })
+                .select()
+                .single();
 
-        if (!error && newTx) {
-            setAllTransactions(prev => [...prev, newTx as FinancialTransaction]);
-            toast.success('Transação registrada com sucesso!');
-        } else if (error) {
-            console.error('[addTransaction] Error:', error);
-            toast.error('Erro ao registrar transação: ' + (error.message || 'Erro desconhecido'));
-        }
-    }, [session, supabase]);
-
-    const addCategory = useCallback(async (data: NewCategoryData) => {
-        if (!session) return;
-        const { data: newCat, error } = await supabase
-            .from('financial_categories')
-            .insert({
-                church_id: session.church.id,
-                name: data.name,
-                type: data.type,
-            })
-            .select()
-            .single();
-
-        if (!error && newCat) {
-            setAllCategories(prev => [...prev, newCat as FinancialCategory]);
-            toast.success('Categoria adicionada!');
-        } else {
-            toast.error('Erro ao adicionar categoria.');
+            if (!error && newTx) {
+                setAllTransactions(prev => [...prev, newTx as FinancialTransaction]);
+                return { success: true };
+            }
+            if (error) throw error;
+            return { success: false, error: 'Erro desconhecido ao registrar transação' };
+        } catch (err: any) {
+            console.error('[addTransaction] Error:', err);
+            return { success: false, error: err.message || 'Erro ao registrar transação' };
         }
     }, [session, supabase]);
 
-    const updateCategory = useCallback(async (id: string, name: string) => {
-        if (!session) return;
-        const { error } = await supabase
-            .from('financial_categories')
-            .update({ name })
-            .eq('id', id)
-            .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
+    const addCategory = useCallback(async (data: NewCategoryData): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
+        try {
+            const { data: newCat, error } = await supabase
+                .from('financial_categories')
+                .insert({
+                    church_id: session.church.id,
+                    name: data.name,
+                    type: data.type,
+                })
+                .select()
+                .single();
 
-        if (!error) {
+            if (!error && newCat) {
+                setAllCategories(prev => [...prev, newCat as FinancialCategory]);
+                return { success: true };
+            }
+            if (error) throw error;
+            return { success: false, error: 'Erro desconhecido ao adicionar categoria' };
+        } catch (err: any) {
+            console.error('[addCategory] Error:', err);
+            return { success: false, error: err.message || 'Erro ao adicionar categoria' };
+        }
+    }, [session, supabase]);
+
+    const updateCategory = useCallback(async (id: string, name: string): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
+        try {
+            const { error } = await supabase
+                .from('financial_categories')
+                .update({ name })
+                .eq('id', id)
+                .eq('church_id', session.church.id);
+
+            if (error) throw error;
             setAllCategories(prev => prev.map(c => c.id === id ? { ...c, name } : c));
-            toast.success('Categoria atualizada!');
-        } else {
-            console.error('Error updating category:', error);
-            toast.error('Erro ao atualizar categoria: ' + error.message);
+            return { success: true };
+        } catch (err: any) {
+            console.error('[updateCategory] Error:', err);
+            return { success: false, error: err.message || 'Erro ao atualizar categoria' };
         }
     }, [session, supabase]);
 
-    const deleteCategory = useCallback(async (id: string) => {
-        if (!session) return;
-        const { error } = await supabase
-            .from('financial_categories')
-            .delete()
-            .eq('id', id)
-            .eq('church_id', session.church.id); // SECURITY FIX: filter by church_id
+    const deleteCategory = useCallback(async (id: string): Promise<{ success: boolean, error?: string }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
+        try {
+            const { error } = await supabase
+                .from('financial_categories')
+                .delete()
+                .eq('id', id)
+                .eq('church_id', session.church.id);
 
-        if (!error) {
+            if (error) throw error;
             setAllCategories(prev => prev.filter(c => c.id !== id));
-            toast.success('Categoria excluída!');
-        } else {
-            console.error('Error deleting category:', error);
-            toast.error('Erro ao excluir categoria: ' + error.message);
+            return { success: true };
+        } catch (err: any) {
+            console.error('[deleteCategory] Error:', err);
+            return { success: false, error: err.message || 'Erro ao excluir categoria' };
         }
     }, [session, supabase]);
 
     // ─── Attendance CRUD ──────────────────────────────────────────
-    const saveAttendanceSession = useCallback(async (data: NewAttendanceSessionData): Promise<AttendanceSession | null> => {
-        if (!session) throw new Error('Sessão não encontrada');
+    const saveAttendanceSession = useCallback(async (data: NewAttendanceSessionData): Promise<{ success: boolean, error?: string, data?: AttendanceSession }> => {
+        if (!session) return { success: false, error: 'Sessão não encontrada' };
 
-        // CRITICAL: Remove the `id` field from the payload.
-        // When using onConflict with a UNIQUE constraint (church_id, room_id, session_date),
-        // Supabase needs to match on those columns. If we pass `id: undefined`,
-        // the DB generates a NEW random UUID which then conflicts with the UNIQUE constraint,
-        // causing the upsert to fail silently.
-        const { id: _removedId, ...dataWithoutId } = data;
+        try {
+            // CRITICAL: Remove the `id` field from the payload.
+            const { id: _removedId, ...dataWithoutId } = data;
 
-        const payload = {
-            ...dataWithoutId,
-            church_id: session.church.id,
-        };
+            const payload = {
+                ...dataWithoutId,
+                church_id: session.church.id,
+            };
 
-        console.log('[saveAttendanceSession] Upserting payload:', JSON.stringify(payload, null, 2));
+            const { data: newSession, error } = await supabase
+                .from('attendance_sessions')
+                .upsert(payload, { onConflict: 'church_id,room_id,session_date' })
+                .select()
+                .single();
 
-        const { data: newSession, error } = await supabase
-            .from('attendance_sessions')
-            .upsert(payload, { onConflict: 'church_id,room_id,session_date' })
-            .select()
-            .single();
+            if (error) throw error;
 
-        if (error) {
-            console.error('[saveAttendanceSession] Supabase error:', error);
-            throw new Error(error.message);
+            if (newSession) {
+                setAllAttendanceSessions(prev => {
+                    const filtered = prev.filter(s => s.id !== newSession.id);
+                    return [...filtered, newSession as AttendanceSession];
+                });
+                return { success: true, data: newSession as AttendanceSession };
+            }
+            return { success: false, error: 'Erro desconhecido ao salvar chamada' };
+        } catch (err: any) {
+            console.error('[saveAttendanceSession] Error:', err);
+            return { success: false, error: err.message || 'Erro ao salvar chamada' };
         }
-
-        if (newSession) {
-            console.log('[saveAttendanceSession] Success! Session ID:', newSession.id);
-            setAllAttendanceSessions(prev => {
-                const filtered = prev.filter(s => s.id !== newSession.id);
-                return [...filtered, newSession as AttendanceSession];
-            });
-        }
-
-        return (newSession as AttendanceSession) ?? null;
     }, [session, supabase]);
 
 

@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import { formatCPF, isValidCPF, formatPhone, calculateAgeGroup, isReasonableDate, normalizeName } from '@/lib/validators';
+import { formatCPF, isValidCPF, formatPhone, calculateAgeGroup, isReasonableDate, normalizeName, getFriendlyErrorMessage } from '@/lib/validators';
 
 export default function NovoMembroPage() {
     const params = useParams();
@@ -102,7 +102,7 @@ export default function NovoMembroPage() {
             toast.success('Membro cadastrado com sucesso!');
             router.push(`/${slug}/membros`);
         } else {
-            toast.error(error || 'Erro ao cadastrar membro.');
+            toast.error(getFriendlyErrorMessage(error));
         }
     };
 

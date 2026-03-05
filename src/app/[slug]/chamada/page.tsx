@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { getFriendlyErrorMessage } from '@/lib/validators';
 
 type AttendanceMap = Record<string, 'presente' | 'ausente' | null>;
 
@@ -133,25 +134,25 @@ export default function ChamadaPage() {
             .filter(([_, status]) => status === 'ausente')
             .map(([id]) => id);
 
-        try {
-            const saved = await saveAttendanceSession({
-                room_id: selectedRoom,
-                room_name: selectedRoomName,
-                session_date: selectedDate,
-                present_member_ids: presentIds,
-                absent_member_ids: absentIds,
-                total_present: presentCount,
-                total_absent: absentCount,
-                finalized: true,
-            });
+        const { success, error, data: saved } = await saveAttendanceSession({
+            room_id: selectedRoom,
+            room_name: selectedRoomName,
+            session_date: selectedDate,
+            present_member_ids: presentIds,
+            absent_member_ids: absentIds,
+            total_present: presentCount,
+            total_absent: absentCount,
+            finalized: true,
+        });
+
+        if (success) {
             if (saved) {
                 setCurrentSessionId(saved.id);
             }
             setHasUnsavedChanges(false);
             toast.success(`Chamada finalizada! ${presentCount} presentes, ${absentCount} ausentes, ${sessionVisitors.length} visitante(s).`);
-        } catch (error: any) {
-            console.error('Erro ao finalizar chamada:', error);
-            toast.error('Erro ao salvar a chamada: ' + (error?.message || 'Tente novamente.'));
+        } else {
+            toast.error(getFriendlyErrorMessage(error));
         }
     };
 

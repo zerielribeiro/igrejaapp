@@ -149,3 +149,44 @@ export function normalizeName(name: string): string {
         })
         .join(' ');
 }
+
+// ─── Error Handling ─────────────────────────────────────────
+/**
+ * Translates technical database error messages (unique constraints, etc.)
+ * to user-friendly messages in Portuguese.
+ */
+export function getFriendlyErrorMessage(error: any): string {
+    if (!error) return 'Ocorreu um erro inesperado.';
+
+    // Convert error to string if it's an object from Supabase/PostgREST
+    const message = typeof error === 'string' ? error : (error.message || '');
+    const details = typeof error === 'string' ? '' : (error.details || '');
+
+    // Map constraints and error patterns
+    if (message.includes('members_church_id_cpf_key') || details.includes('members_church_id_cpf_key')) {
+        return 'Este CPF já está cadastrado em nossa igreja.';
+    }
+
+    if (message.includes('churches_slug_key') || details.includes('churches_slug_key')) {
+        return 'Este link (identificador) já está sendo usado por outra igreja.';
+    }
+
+    if (message.includes('financial_categories_church_id_name_type_key') || details.includes('financial_categories_church_id_name_type_key')) {
+        return 'Uma categoria com este nome e tipo já existe.';
+    }
+
+    if (message.includes('unique_church_room_date') || details.includes('unique_church_room_date')) {
+        return 'Já existe uma chamada registrada para esta sala nesta data.';
+    }
+
+    // Default messages for common patterns
+    if (message.includes('JWT')) {
+        return 'Sua sessão expirou. Por favor, faça login novamente.';
+    }
+
+    if (message.includes('network') || message.includes('fetch')) {
+        return 'Erro de conexão. Verifique sua internet.';
+    }
+
+    return message || 'Ocorreu um erro ao processar sua solicitação.';
+}

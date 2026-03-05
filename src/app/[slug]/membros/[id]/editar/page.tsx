@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import { formatCPF, formatPhone, normalizeName, calculateAgeGroup } from '@/lib/validators';
+import { formatCPF, formatPhone, normalizeName, calculateAgeGroup, getFriendlyErrorMessage } from '@/lib/validators';
 
 export default function EditarMembroPage() {
     const params = useParams();
@@ -66,7 +66,7 @@ export default function EditarMembroPage() {
         );
     }
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name || !birth || !join || !roomId) {
             toast.error('Preencha todos os campos obrigatórios.');
@@ -75,7 +75,7 @@ export default function EditarMembroPage() {
 
         const ageGroup = calculateAgeGroup(birth);
 
-        updateMember(memberId, {
+        const { success, error } = await updateMember(memberId, {
             full_name: normalizeName(name),
             cpf: cpf ? cpf.replace(/\D/g, '') : '',
             birth_date: birth,
@@ -90,8 +90,12 @@ export default function EditarMembroPage() {
             age_group: ageGroup,
         });
 
-        toast.success('Membro atualizado com sucesso!');
-        router.push(`/${slug}/membros/${memberId}`);
+        if (success) {
+            toast.success('Membro atualizado com sucesso!');
+            router.push(`/${slug}/membros/${memberId}`);
+        } else {
+            toast.error(getFriendlyErrorMessage(error));
+        }
     };
 
     return (
