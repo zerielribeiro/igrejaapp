@@ -30,8 +30,8 @@ export async function middleware(request: NextRequest) {
         return await updateSession(request);
     }
 
-    // 5. Login pages don't need auth check
-    if (pathname.endsWith('/login')) {
+    // 5. Login and Registration pages don't need auth check
+    if (pathname.endsWith('/login') || pathname.endsWith('/registro')) {
         return await updateSession(request);
     }
 
