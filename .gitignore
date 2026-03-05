@@ -41,3 +41,15 @@ yarn-error.log*
 next-env.d.ts
 
 # .agent/
+.agent/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+tests/
+playwright.config.ts
+test_*.txt
